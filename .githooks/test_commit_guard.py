@@ -288,6 +288,105 @@ class InspectFilesTest(unittest.TestCase):
         self.assertEqual(inspect_files([("a.md", "ok\nさんぷる語\n".encode("utf-8"))], self.rules), [str(Hit("a.md", 2, 2))])
 
 
+BASE64 = string.ascii_letters + string.digits + "+/"
+LOCK = "pnpm-lock.yaml"
+
+
+def sri(algorithm: str, body: str, padding: str = "") -> str:
+    """integrity の値（W3C の SRI の書式）。"""
+    return f"{algorithm}-{body}{padding}"
+
+
+def random_sri(algorithm: str, length: int, padding: str = "") -> str:
+    return sri(algorithm, "".join(random.choices(BASE64, k=length)), padding)
+
+
+def lockfile(*lines: str) -> bytes:
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+class LockfileIntegrityTest(unittest.TestCase):
+    """pnpm-lock.yaml の integrity の値は、ほぼ乱数の base64 なので禁止語の照合から外す（docs/adr/0013）。"""
+
+    rules = parse_denylist("examplecorp\n")
+    # 実際の base64 の値には + と / も入る。語の前後に挟んで、文字の種類の取りこぼしに気づけるようにする
+    embedded = "A+" * 5 + "examplecorp" + "/B" * 30
+
+    def test_integrityの値の中にそのままの形で含まれる禁止語では止まらない(self):
+        value = sri("sha512", self.embedded, "==")
+        content = lockfile("packages:", "  /left-pad@1.0.0:", f"    resolution: {{integrity: {value}}}")
+        self.assertEqual(inspect_files([(LOCK, content)], self.rules), [])
+        self.assertEqual(len(inspect_files([("other.yaml", content)], self.rules)), 1)
+
+    def test_integrityの値は区切りを取り除く照合でも偶然一致しない(self):
+        rules = parse_denylist("abc\n")
+        content = lockfile(f"x: {sri('sha512', 'x' * 40 + 'ab')}", f"c: {sri('sha256', 'y' * 43, '=')}")
+        self.assertEqual(inspect_files([(LOCK, content)], rules), [])
+        self.assertEqual(len(inspect_files([("other.yaml", content)], rules)), 1)
+
+    def test_パッケージ名の禁止語では止まり行番号は元のまま(self):
+        value = random_sri("sha512", 86, "==")
+        content = lockfile(
+            "lockfileVersion: '9.0'",
+            "packages:",
+            "  /examplecorp@1.0.0:",
+            f"    resolution: {{integrity: {value}}}",
+        )
+        self.assertEqual(inspect_files([(LOCK, content)], self.rules), [str(Hit(LOCK, 3, 1))])
+
+    def test_値と同じ行にあるURLなど値以外の部分の禁止語では止まる(self):
+        value = random_sri("sha512", 86, "==")
+        line = f"    resolution: {{integrity: {value}, tarball: https://registry.test/examplecorp/-/pkg.tgz}}"
+        self.assertEqual(inspect_files([(LOCK, lockfile("packages:", line))], self.rules), [str(Hit(LOCK, 2, 1))])
+
+    def test_別名のファイルは同じ中身でも今までどおり止まる(self):
+        content = lockfile(f"integrity: {sri('sha512', self.embedded, '==')}")
+        for name in ["other.yaml", "pnpm-lock.yml", "pnpm-lock.yaml.bak", "my-pnpm-lock.yaml", "Pnpm-Lock.yaml"]:
+            with self.subTest(name):
+                self.assertEqual(len(inspect_files([(name, content)], self.rules)), 1)
+
+    def test_サブフォルダのpnpm_lockもファイル名で判定して外す(self):
+        content = lockfile(f"integrity: {sri('sha512', self.embedded, '==')}")
+        self.assertEqual(inspect_files([("apps/web/" + LOCK, content)], self.rules), [])
+
+    def test_sha1で始まるパッケージ名は値とみなさず消さない(self):
+        content = lockfile("packages:", "  /sha1-examplecorp@1.0.0:", "  /sha1-" + "a" * 10 + "examplecorp@1.0.0:")
+        self.assertEqual(inspect_files([(LOCK, content)], self.rules), [str(Hit(LOCK, 2, 1)), str(Hit(LOCK, 3, 1))])
+
+    def test_値の途中に見える文字列は消さない(self):
+        # sha1- の前に英数字や区切りが続く（パッケージ名・URL の一部）なら、値ではない
+        content = lockfile(
+            "packages:",
+            "  /jssha256-" + "a" * 10 + "examplecorp" + "b" * 10 + "@1.0.0:",
+            "    resolution: {tarball: https://registry.test/sha1-tools/archive/examplecorp/v1.tgz}",
+        )
+        self.assertEqual(inspect_files([(LOCK, content)], self.rules), [str(Hit(LOCK, 2, 1)), str(Hit(LOCK, 3, 1))])
+
+    def test_値とみなす長さの境界は27字(self):
+        inside = "examplecorp"
+        for length, expected in [(27, 0), (26, 1)]:
+            with self.subTest(length=length):
+                body = "A" * 5 + inside + "B" * (length - 5 - len(inside))
+                content = lockfile(f"integrity: {sri('sha1', body, '=')}")
+                self.assertEqual(len(inspect_files([(LOCK, content)], self.rules)), expected)
+
+    def test_ランダムな値を並べたロックファイルは任意の禁止語で止まらず名前の行だけが止まる(self):
+        rng = random.Random(7)
+        algorithms = [("sha1", 27, "="), ("sha256", 43, "="), ("sha384", 64, ""), ("sha512", 86, "==")]
+        for _ in range(200):
+            # 名前や定型の文字に出てこない文字だけで語を作り、値以外では偶然一致しないようにする
+            term = "".join(rng.choices("qzx", k=rng.randint(3, 8)))
+            rules = parse_denylist(term + "\n")
+            lines = ["lockfileVersion: '9.0'", "packages:"]
+            for n in range(rng.randint(1, 30)):
+                algorithm, length, padding = rng.choice(algorithms)
+                lines += [f"  /left-pad-{n}@1.0.0:", f"    resolution: {{integrity: {random_sri(algorithm, length, padding)}}}"]
+            self.assertEqual(inspect_files([(LOCK, lockfile(*lines))], rules), [])
+            at = rng.randint(2, len(lines))
+            lines.insert(at, f"  /{term}@1.0.0:")
+            self.assertEqual(inspect_files([(LOCK, lockfile(*lines))], rules), [str(Hit(LOCK, at + 1, 1))])
+
+
 class PrivatePathsTest(unittest.TestCase):
     def test_どの階層のprivateディレクトリも対象にする(self):
         paths = ["private/raw.md", "data/private/x.txt", "Private/y.txt", "docs/private.md", "privately/z.md"]
