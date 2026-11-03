@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from commit_guard import normalize
+from commit_guard import normalize, strip_separators
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COPIED = [".githooks", ".gitleaks.toml", ".gitignore"]
@@ -30,6 +30,17 @@ def _gitleaks() -> str:
 
 def _random_term() -> str:
     return "zq" + secrets.token_hex(4)
+
+
+HIRAGANA_POOL = "あいうえおかきくけこさしすせそたちつてとなにぬねの"
+
+
+def _random_kana_term() -> str:
+    return "".join(secrets.choice(HIRAGANA_POOL) for _ in range(5))
+
+
+def _to_katakana(text: str) -> str:
+    return "".join(chr(ord(c) + 0x60) for c in text)
 
 
 def _fullwidth_upper(text: str) -> str:
@@ -96,8 +107,12 @@ class HookTestCase(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, self.output(result))
         self.assertNotEqual(self.git("rev-parse", "--verify", "-q", "HEAD").returncode, 0, "コミットが作られた")
 
-    def assert_term_hidden(self, result):
-        self.assertNotIn(self.term, normalize(self.output(result)))
+    def assert_term_hidden(self, result, term=None):
+        shown = strip_separators(normalize(self.output(result)))
+        self.assertNotIn(normalize(term or self.term), shown)
+
+    def unstage_all(self):
+        self.assertEqual(self.git("reset", "-q").returncode, 0)
 
     def assert_denylist_rule(self, result, location):
         self.assertIn(f"{location}: 禁止語ルール 2", self.output(result))
@@ -176,6 +191,69 @@ class DenylistHookTest(HookTestCase):
         self.assert_blocked(result)
         self.assert_denylist_rule(result, "コミットメッセージ:1")
         self.assert_term_hidden(result)
+
+    def test_ひらがなの禁止語がカタカナの内容・パス名・コミットメッセージで止まる(self):
+        hira = _random_kana_term()
+        kata = _to_katakana(hira)
+        for label, listed, written in [("ひらがなの語", hira, kata), ("カタカナの語", kata, hira)]:
+            self.denylist.write_text(f"# テスト用\n{listed}\n", encoding="utf-8")
+            with self.subTest(label, 場所="内容"):
+                self.unstage_all()
+                self.stage("note.md", f"ok\n{written}\n")
+                result = self.commit()
+                self.assert_blocked(result)
+                self.assert_denylist_rule(result, "note.md:2")
+                self.assert_term_hidden(result, listed)
+            with self.subTest(label, 場所="パス名"):
+                self.unstage_all()
+                self.stage(f"docs/{written}.md", "ok\n")
+                result = self.commit()
+                self.assert_blocked(result)
+                self.assertIn("1 番目のファイル", self.output(result))
+                self.assert_term_hidden(result, listed)
+            with self.subTest(label, 場所="コミットメッセージ"):
+                self.unstage_all()
+                self.stage("note.md", "ok\n")
+                result = self.commit(f"docs: {written}の件")
+                self.assert_blocked(result)
+                self.assert_denylist_rule(result, "コミットメッセージ:1")
+                self.assert_term_hidden(result, listed)
+
+    def test_空白・記号・ゼロ幅文字で区切った書き方で止まる(self):
+        for separator in [" ", "-", "・", "|", "​"]:
+            with self.subTest(separator=repr(separator)):
+                self.stage("note.md", f"ok\n{separator.join(self.term)}\n")
+                result = self.commit()
+                self.assert_blocked(result)
+                self.assert_denylist_rule(result, "note.md:2")
+                self.assert_term_hidden(result)
+
+    def test_改行をまたぐ書き方で止まり行番号は先頭の行(self):
+        head, tail = self.term[:4], self.term[4:]
+        self.stage("note.md", f"ok\n{head}\n{tail}\n")
+        result = self.commit()
+        self.assert_blocked(result)
+        self.assert_denylist_rule(result, "note.md:2")
+        self.assert_term_hidden(result)
+
+        self.unstage_all()
+        self.stage("note.md", "ok\n")
+        result = self.commit(f"docs: テスト\n\n{head}\n{tail}")
+        self.assert_blocked(result)
+        self.assert_denylist_rule(result, "コミットメッセージ:3")
+        self.assert_term_hidden(result)
+
+    def test_区切りを入れたパス名で止まりパス名を出さない(self):
+        self.stage(f"docs/{self.term[:4]}-{self.term[4:]}.md", "ok\n")
+        result = self.commit()
+        self.assert_blocked(result)
+        self.assertIn("1 番目のファイル", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_短い語が入った禁止語リストでも無関係なコミットは通る(self):
+        self.denylist.write_text(f"# テスト用\n{self.term}\nxy\n--\nゐ\n。。\n", encoding="utf-8")
+        self.stage("note.md", "Hello, world.\n文章です。\n")
+        self.assert_passed(self.commit("docs: 追加\n\nCo-Authored-By: Claude <noreply@anthropic.com>"))
 
     def test_禁止語リストが無ければ止まる(self):
         self.denylist.unlink()
