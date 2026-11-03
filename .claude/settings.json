@@ -68,7 +68,7 @@
       "Bash(git commit -n*)",
       "Edit(./.git/**)",
       "Bash(git -c *)",
-      "Read(./private/denylist.txt)",
+      "Read(./private/**)",
       "Bash(curl *)",
       "Bash(wget *)",
       "Bash(cat ./.env)",
