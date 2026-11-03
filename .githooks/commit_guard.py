@@ -32,6 +32,11 @@ INSPECTED_CHANGES = "ACMRT"
 # 文字コードを判別できなくても止めない形式。バイト列のうち UTF-8 として読める部分（画像のメタデータなど）だけを照合する。
 # PDF・書庫・Office 文書はここに入れない（作者名などが入りやすく、読めないなら止める）
 RAW_SCAN_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".woff", ".woff2", ".ttf", ".otf"})
+# pnpm のロックファイル。integrity の値（ほぼ乱数の base64）を取り除いてから照合する（docs/adr/0013）
+LOCKFILE_NAME = "pnpm-lock.yaml"
+# SRI（W3C のサブリソース完全性）の値。下限の 27 字は SHA-1 の base64（28 字）に合わせ、`sha1-` で始まるパッケージ名を消さないため。
+# 前に英数字・`+`・`/`・`-` が続くもの（パッケージ名や URL の途中）は値とみなさない
+SRI_VALUE = re.compile(r"(?<![A-Za-z0-9+/-])sha(?:1|256|384|512)-[A-Za-z0-9+/]{27,}={0,2}")
 GITLINK_MODE = "160000"
 # 文字として読めても、これ以上の割合で制御文字・未割り当て・私用の文字があればバイナリとみなす
 MAX_NON_TEXT_RATIO = 0.02
@@ -233,6 +238,8 @@ def inspect_files(
         except Undecodable:
             problems.append(f"{label}: 文字コードを判別できないため検査できません（UTF-8 のテキストにしてください）")
             continue
+        if PurePosixPath(path).name == LOCKFILE_NAME:
+            text = SRI_VALUE.sub("", text)  # 行の中だけで消えるので、行番号は変わらない
         problems.extend(scan_text(label, text, rules))
     return [str(p) for p in problems]
 

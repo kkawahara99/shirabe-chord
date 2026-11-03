@@ -4,6 +4,7 @@
 このファイル自体が検査に掛からず、本物の禁止語リストとも衝突しないようにするため。
 """
 
+import base64
 import os
 import re
 import secrets
@@ -602,6 +603,14 @@ class PrePushHookTest(PushTestCase):
         self.assert_push_blocked(result)
         self.assert_gitleaks_rule(result, "github-pat")
         self.assertNotIn(token, self.output(result))
+
+    def test_integrityの値だけが禁止語に一致するpnpm_lockはpushできる(self):
+        body = base64.b64encode(os.urandom(64)).decode("ascii")
+        value = "sha512-" + body[:30] + self.term + body[30 + len(self.term) :]
+        lines = ["lockfileVersion: '9.0'", "packages:", "  /left-pad@1.0.0:", f"    resolution: {{integrity: {value}}}"]
+        content = "\n".join(lines) + "\n"
+        self.commit_file("pnpm-lock.yaml", content, bypass=True)
+        self.assert_pushed(self.push("main"))
 
     def test_範囲の途中のコミットの違反でも止まる(self):
         self.commit_file("a.md")
