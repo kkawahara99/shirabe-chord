@@ -148,7 +148,7 @@ def find_bypass(command: str, depth: int = 0) -> Optional[str]:
     """検査を外す操作が含まれていれば、その種類を返す。
 
     範囲外として通すもの: 変数や `$(…)` で組み立てた git、git の別名（alias）、
-    スクリプトファイル経由の実行。これらは allow に入っておらず、権限の確認に任せる。
+    スクリプトファイル経由の実行。これらはフックでは追えないので、権限の設定と Auto モードの判断に任せる。
     """
     try:
         segments = split_segments(command)
