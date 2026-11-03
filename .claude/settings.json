@@ -105,6 +105,16 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-unchecked-gh-writes.sh\"",
+            "timeout": 60
+          }
+        ]
+      },
+      {
         "matcher": "Bash|PowerShell|Read|Edit|Write|NotebookEdit|Glob|Grep",
         "hooks": [
           {
