@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -227,6 +229,119 @@ class FindSensitiveTest(unittest.TestCase):
 
     def test_保護する場所の一覧は空でない(self):
         self.assertIn("Downloads", PROTECTED)
+
+
+class PrivateDirTest(unittest.TestCase):
+    """プロジェクト直下の private/（禁止語リストの置き場）と SHIRABE_CHORD_DENYLIST が指すファイルを、直接指したら止める。"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve() / "repo"
+        (self.root / ".git").mkdir(parents=True)
+        (self.root / "docs").mkdir()
+        self.environ = {}
+
+    def blocked(self, command, cwd=None, environ=None):
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+        return find_sensitive(payload, HOME, str(cwd or self.root), self.environ if environ is None else environ)
+
+    def tool(self, name, tool_input, cwd=None):
+        return find_sensitive({"tool_name": name, "tool_input": tool_input}, HOME, str(cwd or self.root), self.environ)
+
+    def test_Bashでprivate直下を指すと止める(self):
+        absolute = (self.root / "private" / "denylist.txt").as_posix()
+        for command in [
+            "cat private/denylist.txt",
+            "rg . private/",
+            "sed -n 5p ./private/denylist.txt",
+            "cat private\\denylist.txt",
+            "ls private",
+            f"cat {absolute}",
+            "ls priv*",
+            "cat private*/denylist.txt",
+            "cat ?rivate/denylist.txt",
+            "cat [p]rivate/denylist.txt",
+            'cat "$SHIRABE_CHORD_DENYLIST"',
+            "cat $CLAUDE_PROJECT_DIR/private/denylist.txt",
+        ]:
+            with self.subTest(command=command):
+                self.assertIsNotNone(self.blocked(command))
+
+    def test_cwdが下の階層でも上のprivateを止める(self):
+        self.assertIsNotNone(self.blocked("cat ../private/denylist.txt", cwd=self.root / "docs"))
+
+    def test_worktreeから本体側のprivateも止める(self):
+        worktree = self.root / ".claude" / "worktrees" / "1-x"
+        worktree.mkdir(parents=True)
+        (worktree / ".git").write_text(f"gitdir: {(self.root / '.git' / 'worktrees' / '1-x').as_posix()}\n", encoding="utf-8")
+        for command in ["cat private/denylist.txt", f"cat {(self.root / 'private' / 'denylist.txt').as_posix()}"]:
+            with self.subTest(command=command):
+                self.assertIsNotNone(self.blocked(command, cwd=worktree))
+
+    def test_CLAUDE_PROJECT_DIRがあればそれをルートにする(self):
+        elsewhere = self.root.parent / "elsewhere"
+        elsewhere.mkdir()
+        environ = {"CLAUDE_PROJECT_DIR": str(self.root)}
+        self.assertIsNotNone(self.blocked(f"cat {(self.root / 'private' / 'denylist.txt').as_posix()}", cwd=elsewhere, environ=environ))
+
+    def test_環境変数SHIRABE_CHORD_DENYLISTのファイルを止める(self):
+        listing = self.root.parent / "elsewhere" / "words.txt"
+        self.environ = {"SHIRABE_CHORD_DENYLIST": str(listing)}
+        self.assertIsNotNone(self.blocked(f"cat {listing.as_posix()}"))
+        self.assertIsNotNone(self.tool("Read", {"file_path": str(listing)}))
+
+    def test_ファイルツールでprivate配下を止める(self):
+        inside = str(self.root / "private" / "denylist.txt")
+        for name, tool_input in [
+            ("Read", {"file_path": inside}),
+            ("Edit", {"file_path": inside}),
+            ("Write", {"file_path": inside, "content": "x"}),
+            ("NotebookEdit", {"notebook_path": str(self.root / "private" / "a.ipynb")}),
+            ("Glob", {"pattern": "private/**"}),
+            ("Grep", {"pattern": "x", "path": "private"}),
+            ("Grep", {"pattern": "x", "glob": "private/*"}),
+        ]:
+            with self.subTest(tool=name, tool_input=tool_input):
+                self.assertIsNotNone(self.tool(name, tool_input))
+
+    def test_privateを含むだけの語は通す(self):
+        for command in ["cat docs/private-notes.md", "ls", "rg foo", "rg foo docs/", "git status"]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.blocked(command))
+
+    def test_検索語のprivateは通す(self):
+        for command in ["rg private docs/", 'grep -n "private/" .gitignore', "git grep -n private", "rg -e private docs", "rg --regexp=private docs"]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.blocked(command))
+        self.assertIsNone(self.tool("Grep", {"pattern": "private"}))
+
+    def test_ルート起点の再帰検索は通す(self):
+        for command in ["grep -r foo .", "find . -name x", "rg foo", "ls *"]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.blocked(command))
+        for name, tool_input in [
+            ("Glob", {"pattern": "**/*.py"}),
+            ("Glob", {"pattern": "**/*"}),
+            ("Grep", {"pattern": "x", "path": str(self.root)}),
+        ]:
+            with self.subTest(tool=name, tool_input=tool_input):
+                self.assertIsNone(self.tool(name, tool_input))
+
+    def test_SHIRABE_CHORD_DENYLISTが未設定でも通常どおり動く(self):
+        self.assertIsNone(self.blocked("git status", environ={}))
+        self.assertIsNotNone(self.blocked("cat private/x", environ={}))
+
+
+class PrivateHookScriptTest(unittest.TestCase):
+    def test_privateを指す操作は終了コード2で止める(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".git").mkdir()
+            payload = {"tool_name": "Bash", "tool_input": {"command": "cat private/denylist.txt"}, "cwd": str(root)}
+            env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "SHIRABE_CHORD_DENYLIST")}
+            result = subprocess.run(["sh", str(HOOK)], input=json.dumps(payload).encode("utf-8"), capture_output=True, env=env)
+        self.assertEqual(result.returncode, 2, result.stderr.decode("utf-8"))
 
 
 class HookScriptTest(unittest.TestCase):

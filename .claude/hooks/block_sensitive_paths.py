@@ -14,12 +14,17 @@
 - 保護した場所を含む上位の場所（ホームなど）を、再帰して探す操作の起点にしたもの
   （`find ~`・`rg x ~`・`ls -R ~`・`grep -r x ~`・`Get-ChildItem ~ -Recurse`、Glob・Grep の path）
 
+プロジェクト直下の `private/`（禁止語リストの置き場。worktree では本体側のも）と、環境変数 `SHIRABE_CHORD_DENYLIST` が指すファイルも
+保護する。語やパスが指すかの判定だけに使い、再帰検索の起点の判定には使わない（`rg` は .gitignore を見て `private/` を飛ばすため）。
+`private` を探すだけの操作を通すため、検索語は対象外（下の「再帰検索の検索語」と同じもの。Grep の pattern も）。
+変数を展開できない語は、区切りつきの `private` を含むか、`$SHIRABE_CHORD_DENYLIST` を参照していれば止める。
+
 調べないもの: `<<EOF` の本文、空白を含む語（コミットメッセージなど）。ただし語の中の `$(…)`・バッククォートの中身はコマンドとして調べる。
 
 範囲外として通すもの（権限の確認に任せる）: スクリプトファイルの中身、`$(echo ~)/…` や `[Environment]::GetFolderPath(…)` のように
 実行時に決まる場所、シンボリックリンクやジャンクション、`cmd` の `dir /s`、
 `select-string -Recurse` のような、上に挙げていない再帰の探し方、`cp -r ~ …`・`tar`・`zip -r`・`rsync`・`robocopy` で
-ホームを丸ごと写す操作、`sudo -u ユーザー` のようにオプションの値を取る前置き、`echo ~ | xargs find` のようにパイプで起点を渡す形。
+ホームを丸ごと写す操作、プロジェクト直下を起点にした再帰検索（`grep -r`・`find`・`rg -u`）で `private/` に届くこと、`sudo -u ユーザー` のようにオプションの値を取る前置き、`echo ~ | xargs find` のようにパイプで起点を渡す形。
 `sudo`・`env`・`timeout` などの前置きは飛ばして調べる。再帰検索の検索語（grep・rg の最初の位置引数と `-e` の値）は起点とみなさない。
 空白を含む語は、先頭が `~/` や `$HOME/` のときだけパスとして解決する（空白入りのパスを守るため。文章が `~/` で始まると止まる）。
 """
@@ -32,7 +37,8 @@ import os
 import posixpath
 import re
 import sys
-from typing import Optional
+from pathlib import Path
+from typing import Mapping, Optional
 
 from block_hook_bypass import nested_commands, split_segments
 
@@ -93,8 +99,17 @@ OPTIONS_WITH_VALUE_BY_COMMAND = {
 # 実際のコマンドの前に置かれるもの
 WRAPPER_COMMANDS = {"sudo", "env", "timeout", "command", "nice", "time", "nohup", "exec", "xargs"}
 
+# 環境変数 SHIRABE_CHORD_DENYLIST: 禁止語リストを private/ の外に置いたときの場所
+DENYLIST_VARIABLE = "SHIRABE_CHORD_DENYLIST"
+PRIVATE_NAME = "private/"
+Places = tuple[tuple[str, str], ...]  # (名前, 比較用の絶対パス) の並び
+
+# 変数を展開できない語に含まれる private/ の名前と、禁止語リストの変数の参照
+PRIVATE_BY_NAME = re.compile(r"(^|/)private(/|$)", re.IGNORECASE)
+DENYLIST_REFERENCE = re.compile(r"\$\{?(?:env:)?SHIRABE_CHORD_DENYLIST|%SHIRABE_CHORD_DENYLIST%", re.IGNORECASE)
+
 MESSAGE = (
-    "ダウンロードフォルダ・資格情報の置き場所・ブラウザのプロファイルには触れません。"
+    "ダウンロードフォルダ・資格情報の置き場所・ブラウザのプロファイル・禁止語リスト（private/）には触れません。"
     "ネットから落としたものが入る場所や、読まれると漏れるものがあるためです。"
     "必要なファイルは、本人がリポジトリの中（例: .cache/ や work/）に置きます。"
 )
@@ -116,6 +131,42 @@ def protected_paths(home: str) -> list[tuple[str, str]]:
     """(ホームからの相対パス, 比較用の絶対パス) の一覧。比較は小文字・スラッシュ区切りで行う。"""
     root = posixpath.normpath(forward(home)).casefold()
     return [(rel, posixpath.join(root, rel.casefold())) for rel in PROTECTED]
+
+
+def project_roots(cwd: str, environ: Mapping[str, str]) -> list[Path]:
+    """プロジェクトのルート。`CLAUDE_PROJECT_DIR`、無ければ cwd から上へたどって `.git` がある最初の場所。
+    worktree（`.git` がファイル）なら、`gitdir:` の行から本体の作業ツリーも足す。"""
+    start = environ.get("CLAUDE_PROJECT_DIR")
+    root = Path(start) if start else next((p for p in (Path(cwd), *Path(cwd).parents) if (p / ".git").exists()), None)
+    if root is None:
+        return []
+    roots = [root]
+    git = root / ".git"
+    try:
+        if git.is_file():
+            match = re.match(r"gitdir:\s*(.+)", git.read_text(encoding="utf-8", errors="replace"))
+            if match:
+                gitdir = root / match.group(1).strip()  # 相対パスなら root 基準。絶対パスならそのまま使われる
+                main = next((p.parent for p in (gitdir, *gitdir.parents) if p.name == ".git"), None)
+                if main is not None:
+                    roots.append(main)
+    except OSError:
+        pass
+    return roots
+
+
+def private_places(home: str, cwd: str, environ: Mapping[str, str]) -> Places:
+    """プロジェクト直下の private/ と、SHIRABE_CHORD_DENYLIST が指すファイル。"""
+    places = []
+    for root in project_roots(cwd, environ):
+        resolved = resolve(str(root), home, cwd)
+        if resolved:
+            places.append((PRIVATE_NAME, resolved + "/private"))
+    denylist = environ.get(DENYLIST_VARIABLE)
+    resolved = resolve(denylist, home, cwd) if denylist else None
+    if resolved:
+        places.append((DENYLIST_VARIABLE, resolved))
+    return tuple(places)
 
 
 def expand_braces(word: str) -> list[str]:
@@ -150,10 +201,22 @@ def resolve(word: str, home: str, base: str) -> Optional[str]:
     return posixpath.normpath(text).casefold()
 
 
-def hits_protected(resolved: str, home: str) -> Optional[str]:
-    """解決済みのパスが保護した場所を指していれば、その名前を返す。"""
+def hits_protected(resolved: str, home: str, extra: Places = ()) -> Optional[str]:
+    """解決済みのパスが保護した場所（ホームの一覧と、プロジェクトの private）を指していれば、その名前を返す。"""
     has_glob = any(c in resolved for c in GLOB_CHARS)
     literal_head = re.split(r"[*?\[]", resolved, maxsplit=1)[0]
+    for name, absolute in extra:
+        if resolved == absolute or resolved.startswith(absolute + "/"):
+            return name
+        # `private/*`・`priv*/x` は止めるが、名前の文字を1つも書いていない `*`・`**/*` は通す（ルート起点の探索は範囲外）
+        if has_glob:
+            globbed, fixed = resolved.split("/"), absolute.split("/")
+            if (
+                len(globbed) >= len(fixed)
+                and all(fnmatch.fnmatchcase(f, g) for f, g in zip(fixed, globbed))
+                and globbed[len(fixed) - 1].replace("*", "")
+            ):
+                return name
     for rel, absolute in protected_paths(home):
         if resolved == absolute or resolved.startswith(absolute + "/"):
             return rel
@@ -186,12 +249,14 @@ def hits_by_name(word: str) -> Optional[str]:
     return None
 
 
-def check_word(word: str, home: str, base: str) -> Optional[str]:
+def check_word(word: str, home: str, base: str, extra: Places = ()) -> Optional[str]:
     has_space = any(c.isspace() for c in word)
     for variant in expand_braces(word):
         resolved = resolve(variant, home, base)
         if resolved is not None:
-            found = hits_protected(resolved, home)
+            found = hits_protected(resolved, home, extra)
+        elif extra and not has_space and (PRIVATE_BY_NAME.search(forward(variant)) or DENYLIST_REFERENCE.search(variant)):
+            found = PRIVATE_NAME
         else:
             # 空白を含む語は文章（コミットメッセージなど）とみなし、名前だけでは止めない
             found = None if has_space else hits_by_name(variant)
@@ -230,28 +295,48 @@ def command_start(segment: list[str]) -> int:
     return i
 
 
-def search_roots(name: str, args: list[str]) -> list[str]:
-    """再帰して探すコマンドの引数から、探索の起点にあたる語を取り出す（検索語や、オプションの値は除く）。"""
+def parse_search_args(name: str, args: list[str]) -> tuple[list[str], list[int]]:
+    """探すコマンドの引数から、探索の起点にあたる語と、検索語にあたる引数の位置を取り出す（オプションの値は除く）。"""
     roots: list[str] = []
+    patterns: list[int] = []
     # `-e`・`-f` で検索語を渡したときや、`rg --files` のように検索語を取らないときは、位置引数はすべて起点
     has_pattern_option = name not in FD_COMMANDS and any(a in ("-e", "--regexp", "-f", "--file", "--files", "--type-list") for a in args)
     options_with_value = OPTIONS_WITH_VALUE | OPTIONS_WITH_VALUE_BY_COMMAND.get(name, set())
     skip_next = False
+    next_is_pattern = False
     pattern_pending = name in PATTERN_COMMANDS and not has_pattern_option
-    for arg in args:
+    for i, arg in enumerate(args):
         if skip_next:
             skip_next = False
+            if next_is_pattern:
+                patterns.append(i)
+        elif arg.startswith("--regexp=") and name not in FD_COMMANDS:
+            patterns.append(i)
         elif arg in options_with_value:
             skip_next = True
+            next_is_pattern = arg in ("-e", "--regexp") and name not in FD_COMMANDS
         elif arg.startswith("-"):
             # PowerShell の `-Path:値`
             if name in CHILDITEM_COMMANDS and ":" in arg:
                 roots.append(arg.split(":", 1)[1])
         elif pattern_pending:
             pattern_pending = False  # 最初の位置引数は検索語
+            patterns.append(i)
         else:
             roots.append(arg)
-    return roots
+    return roots, patterns
+
+
+def search_pattern_indexes(segment: list[str]) -> set[int]:
+    """segment のうち、grep・rg・`git grep` などの検索語にあたる語の位置。"""
+    start = command_start(segment)
+    name = command_name(segment[start])
+    offset = start + 1
+    if name == "git" and segment[offset : offset + 1] == ["grep"]:
+        name, offset = "grep", offset + 1
+    if name not in PATTERN_COMMANDS:
+        return set()
+    return {offset + i for i in parse_search_args(name, segment[offset:])[1]}
 
 
 def broad_search(segment: list[str], home: str, base: str) -> Optional[str]:
@@ -261,7 +346,7 @@ def broad_search(segment: list[str], home: str, base: str) -> Optional[str]:
     args = segment[start + 1 :]
     if not is_recursive(name, [t for t in args if t.startswith("-")]):
         return None
-    roots = search_roots(name, args) or ["."]  # 起点を省いたときは、いまのディレクトリから探す
+    roots = parse_search_args(name, args)[0] or ["."]  # 起点を省いたときは、いまのディレクトリから探す
     for word in roots:
         resolved = resolve(word, home, base)
         found = contains_protected(resolved, home) if resolved else None
@@ -289,7 +374,7 @@ def top_level_lines(text: str) -> list[str]:
     return [line for line in lines if line.strip()]
 
 
-def find_in_command(command: str, home: str, cwd: str, depth: int = 0) -> Optional[str]:
+def find_in_command(command: str, home: str, cwd: str, depth: int = 0, extra: Places = ()) -> Optional[str]:
     # split_segments は posix の引用解釈なので、`\` はあらかじめ `/` にしてパスを壊さないようにする
     text = HEREDOC.sub(lambda m: m.group("rest"), forward(command))
     try:
@@ -298,17 +383,18 @@ def find_in_command(command: str, home: str, cwd: str, depth: int = 0) -> Option
         # 解析できないコマンドは、語の区切りだけで粗く調べる
         lines = [[w.strip("\"'") for w in part.split()] for part in re.split(r"[;&|\n]+", text)]
         words = [w for line in lines for w in line]
-        found = next((f for w in words if (f := check_word(w, home, cwd))), None)
+        found = next((f for w in words if (f := check_word(w, home, cwd, extra))), None)
         return found or next((f for line in lines if line and (f := broad_search(line, home, cwd))), None)
     here = cwd
     for segment in segments:
-        for word in segment:
-            found = check_word(word, home, here)
+        patterns = search_pattern_indexes(segment)
+        for i, word in enumerate(segment):
+            found = check_word(word, home, here, () if i in patterns else extra)
             if found:
                 return found
             if depth < MAX_NESTING and any(c.isspace() for c in word):
                 for match in SUBSTITUTION.finditer(word):
-                    found = find_in_command(match.group(1) or match.group(2), home, here, depth + 1)
+                    found = find_in_command(match.group(1) or match.group(2), home, here, depth + 1, extra)
                     if found:
                         return found
         found = broad_search(segment, home, here)
@@ -316,7 +402,7 @@ def find_in_command(command: str, home: str, cwd: str, depth: int = 0) -> Option
             return found
         if depth < MAX_NESTING:
             for nested in nested_commands(segment):
-                found = find_in_command(nested, home, here, depth + 1)
+                found = find_in_command(nested, home, here, depth + 1, extra)
                 if found:
                     return found
         if segment[0].casefold() in CD_COMMANDS:
@@ -326,13 +412,13 @@ def find_in_command(command: str, home: str, cwd: str, depth: int = 0) -> Option
     return None
 
 
-def find_in_search_tool(payload: dict, home: str, cwd: str) -> Optional[str]:
+def find_in_search_tool(payload: dict, home: str, cwd: str, extra: Places = ()) -> Optional[str]:
     """Glob・Grep の入力を調べる。pattern・glob は path を基準に解決し、path が上位の場所なら止める。"""
     tool_input = payload.get("tool_input") or {}
     base = cwd
     path = tool_input.get("path")
     if isinstance(path, str) and path:
-        found = check_word(path, home, cwd)
+        found = check_word(path, home, cwd, extra)
         resolved = resolve(path, home, cwd)
         if found or resolved is None:
             return found
@@ -344,7 +430,7 @@ def find_in_search_tool(payload: dict, home: str, cwd: str) -> Optional[str]:
     value = tool_input.get(field)
     if not (isinstance(value, str) and value):
         return None
-    found = check_word(value, home, base)
+    found = check_word(value, home, base, extra)
     resolved = resolve(value, home, base)
     if found or resolved is None or not any(c in resolved for c in GLOB_CHARS):
         return found
@@ -353,17 +439,18 @@ def find_in_search_tool(payload: dict, home: str, cwd: str) -> Optional[str]:
     return contains_protected(head if head.endswith("/") else posixpath.dirname(head), home)
 
 
-def find_sensitive(payload: dict, home: str, cwd: str) -> Optional[str]:
+def find_sensitive(payload: dict, home: str, cwd: str, environ: Optional[Mapping[str, str]] = None) -> Optional[str]:
     """ツールの入力に保護した場所への参照があれば、その名前を返す。"""
     tool_input = payload.get("tool_input") or {}
+    extra = private_places(home, cwd, os.environ if environ is None else environ)
     command = tool_input.get("command")
     if isinstance(command, str):
-        return find_in_command(command, home, cwd)
+        return find_in_command(command, home, cwd, extra=extra)
     if payload.get("tool_name") in ("Glob", "Grep"):
-        return find_in_search_tool(payload, home, cwd)
+        return find_in_search_tool(payload, home, cwd, extra)
     fields = PATH_FIELDS.get(payload.get("tool_name"), ())
     values = [tool_input.get(key) for key in fields]
-    return next((found for v in values if isinstance(v, str) and v and (found := check_word(v, home, cwd))), None)
+    return next((found for v in values if isinstance(v, str) and v and (found := check_word(v, home, cwd, extra))), None)
 
 
 def main() -> int:
@@ -373,7 +460,8 @@ def main() -> int:
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else os.getcwd()
     found = find_sensitive(payload, os.path.expanduser("~"), cwd)
     if found:
-        print(f"{MESSAGE}（検出: ホームの {found}）", file=sys.stderr)
+        place = f"ホームの {found}" if found in PROTECTED else found
+        print(f"{MESSAGE}（検出: {place}）", file=sys.stderr)
         return 2
     return 0
 
