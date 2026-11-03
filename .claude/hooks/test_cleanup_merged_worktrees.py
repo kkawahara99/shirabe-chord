@@ -1,0 +1,130 @@
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+HOOK = Path(__file__).resolve().parent / "cleanup-merged-worktrees.sh"
+
+# `gh pr list --head <branch> --state merged ...` の代役。<FAKE_GH_DIR>/<branch の / を _ にした名前> の中身（headRefOid）を返す。
+FAKE_GH = """#!/usr/bin/env bash
+branch=""
+while [ $# -gt 0 ]; do
+  [ "$1" = "--head" ] && branch="$2"
+  shift
+done
+f="$FAKE_GH_DIR/${branch//\\//_}"
+[ -f "$f" ] && cat "$f"
+exit 0
+"""
+
+
+class CleanupMergedWorktreesTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self.gh_dir = self.tmp / "gh"
+        self.gh_dir.mkdir()
+        (self.tmp / "bin").mkdir()
+        gh = self.tmp / "bin" / "gh"
+        gh.write_text(FAKE_GH, encoding="utf-8", newline="\n")
+        gh.chmod(0o755)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.name", "t")
+        self.git("config", "user.email", "test@users.noreply.github.com")
+        self.git("config", "commit.gpgsign", "false")
+        self.commit("base")
+
+    def git(self, *args, cwd=None):
+        result = subprocess.run(
+            ["git", *args], cwd=cwd or self.repo, capture_output=True, text=True, encoding="utf-8"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def commit(self, name, cwd=None):
+        self.git("commit", "-q", "--allow-empty", "-m", name, cwd=cwd)
+        return self.git("rev-parse", "HEAD", cwd=cwd)
+
+    def add_worktree(self, branch):
+        path = self.tmp / branch.replace("/", "_")
+        self.git("worktree", "add", "-q", str(path), "-b", branch)
+        return path
+
+    def merged_pr_head(self, branch, oid):
+        (self.gh_dir / branch.replace("/", "_")).write_text(oid + "\n", encoding="utf-8")
+
+    def run_hook(self):
+        env = {**os.environ, "FAKE_GH_DIR": str(self.gh_dir)}
+        env["PATH"] = str(self.tmp / "bin") + os.pathsep + env["PATH"]
+        # Windows では PATH 上の bash が WSL のことがあるので、Git の sh 経由で bash を呼ぶ
+        result = subprocess.run(
+            ["sh", "-c", 'exec bash "$0"', HOOK.as_posix()],
+            cwd=self.repo, env=env, capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def branches(self):
+        return self.git("branch", "--format=%(refname:short)").split()
+
+    def test_ローカルHEADがPRの最終コミットと同じなら消す(self):
+        wt = self.add_worktree("feat/a")
+        self.merged_pr_head("feat/a", self.commit("a", cwd=wt))
+        self.run_hook()
+        self.assertFalse(wt.exists())
+        self.assertNotIn("feat/a", self.branches())
+
+    def test_ローカルHEADがPRの最終コミットの祖先なら消す(self):
+        # PR マージ前に GitHub 側で積まれた main の取り込みを、ローカルが持っていない状況
+        wt = self.add_worktree("feat/a")
+        self.commit("a", cwd=wt)
+        self.merged_pr_head("feat/a", self.commit("merge main into a (remote only)", cwd=wt))
+        self.git("reset", "-q", "--hard", "HEAD~1", cwd=wt)
+        self.run_hook()
+        self.assertFalse(wt.exists())
+        self.assertNotIn("feat/a", self.branches())
+
+    def test_PRに含まれないコミットがあれば残す(self):
+        wt = self.add_worktree("feat/a")
+        self.merged_pr_head("feat/a", self.commit("a", cwd=wt))
+        self.commit("unpushed", cwd=wt)
+        self.run_hook()
+        self.assertTrue(wt.exists())
+        self.assertIn("feat/a", self.branches())
+
+    def test_ローカルに無いコミットがPRの最終コミットなら残す(self):
+        wt = self.add_worktree("feat/a")
+        self.commit("a", cwd=wt)
+        self.merged_pr_head("feat/a", "0" * 40)
+        self.run_hook()
+        self.assertTrue(wt.exists())
+        self.assertIn("feat/a", self.branches())
+
+    def test_未コミット変更があれば残す(self):
+        wt = self.add_worktree("feat/a")
+        self.merged_pr_head("feat/a", self.commit("a", cwd=wt))
+        (wt / "dirty.txt").write_text("x", encoding="utf-8")
+        self.run_hook()
+        self.assertTrue(wt.exists())
+        self.assertIn("feat/a", self.branches())
+
+    def test_同名ブランチの複数のマージ済みPRのどれかに含まれれば消す(self):
+        wt = self.add_worktree("feat/a")
+        head = self.commit("a", cwd=wt)
+        (self.gh_dir / "feat_a").write_text("1" * 40 + chr(10) + head + chr(10), encoding="utf-8")
+        self.run_hook()
+        self.assertFalse(wt.exists())
+
+    def test_マージ済みPRが無ければ残す(self):
+        wt = self.add_worktree("feat/a")
+        self.commit("a", cwd=wt)
+        self.run_hook()
+        self.assertTrue(wt.exists())
+        self.assertIn("feat/a", self.branches())
+
+
+if __name__ == "__main__":
+    unittest.main()

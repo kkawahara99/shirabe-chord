@@ -8,9 +8,13 @@
 #   - 本体（リポジトリ直下）は対象外
 #   - 未コミット変更がある worktree は残す
 #   - 対応 PR が MERGED のブランチだけ remove + branch -d する（未マージ・PR無しは残す）
-#   - MERGED PR の headRefOid とローカル HEAD が一致する場合だけ削除する（未 push コミットの消失、
-#     ブランチ名再利用時の誤削除を防ぐ。同名ブランチで複数の MERGED PR が返ることがあるため、
-#     いずれか1つの headRefOid と一致すれば削除継続とする）
+#   - ローカル HEAD が MERGED PR の headRefOid と同じか、その祖先のときだけ削除する（未 push コミットの
+#     消失、ブランチ名再利用時の誤削除を防ぐ。PR のマージ前に GitHub 側で積まれた
+#     「Merge branch 'main' into ...」をローカルが取り込んでいなくても、祖先なので失うものはない。
+#     同名ブランチで複数の MERGED PR が返ることがあるため、いずれか1つに当てはまれば削除継続とする）
+#   - 前提と限界: PR の最終コミットがローカルに fetch 済みであること（無ければ残す）。ブランチ名を
+#     使い回し、本体の main が古いまま同名で作り直した直後の worktree（まだ独自コミット無し）は、
+#     旧 PR の祖先に見えて消えうる。失うコミットは無いが、ignore 済みファイルは消える。
 #
 # 出力は stderr のみ（SessionStart の stdout はコンテキストに注入されるため汚さない）。
 set -uo pipefail
@@ -39,7 +43,10 @@ git worktree list --porcelain 2>/dev/null | awk '
 
   match=0
   while IFS= read -r oid; do
-    [ "$oid" = "$local_head" ] && match=1
+    [ -n "$oid" ] || continue
+    # PR の最終コミットに含まれる（同一も可）なら、ローカルだけにあるコミットは無い。
+    # oid がローカルに無い（未 fetch）ときは失敗するので、安全側に倒れてスキップする。
+    git merge-base --is-ancestor "$local_head" "$oid" 2>/dev/null && match=1
   done <<< "$merged_oids"
 
   if [ "$match" -eq 1 ]; then
@@ -50,7 +57,7 @@ git worktree list --porcelain 2>/dev/null | awk '
       echo "cleanup-merged-worktrees: removed merged worktree '$branch'" >&2
     fi
   else
-    echo "cleanup-merged-worktrees: skip '$branch' (MERGED PR headRefOid does not match local HEAD $local_head — possible unpushed commit or reused branch name)" >&2
+    echo "cleanup-merged-worktrees: skip '$branch' (local HEAD $local_head is not contained in the MERGED PR head — unpushed commit, reused branch name, or PR head not fetched yet)" >&2
   fi
 done
 
