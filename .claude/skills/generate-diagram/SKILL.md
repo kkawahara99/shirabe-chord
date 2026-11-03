@@ -1,6 +1,6 @@
 ---
 name: generate-diagram
-description: コードから依存グラフ等の図を都度生成する。人が全体像を見たいときに使う。静的抽出を一次（TS/JSはmadge、Pythonはimport走査等）、意味づけが要る上位の構成図はコードを読んでモデルが構成する。出力はコミットせず一時表示（work/ かスクラッチ）に置く。「構成図を出して」「依存関係を図にして」「アーキ図を生成して」と言われたら使う。
+description: コードから依存グラフ等の図を都度生成する。人が全体像を見たいときに使う。静的抽出を一次（TS/JSはmadge等）、意味づけが要る上位の構成図はコードを読んでモデルが構成する。出力はコミットせず一時表示（work/ かスクラッチ）に置く。「構成図を出して」「依存関係を図にして」「アーキ図を生成して」と言われたら使う。
 ---
 
 # generate-diagram — 図のオンデマンド生成
@@ -25,37 +25,6 @@ description: コードから依存グラフ等の図を都度生成する。人�
 
 - `npx madge --json <対象ディレクトリ>`（JSON）か `npx madge --image work/deps.svg <対象ディレクトリ>`。`--circular` で循環検出。
 - madge が使えない環境では import 文を grep して辺を起こす。
-
-### Python（採用した場合）
-
-- `pydeps` があれば: `pydeps <pkg> --max-bacon 2 --noshow -o work/deps.svg`。
-- 無ければ標準ライブラリで代替（インストール不要・パッケージ内 import だけを辺にする）:
-
-```bash
-python - "$@" <<'PY'
-import ast, pathlib, sys
-pkg = pathlib.Path(sys.argv[1])
-root = pkg.name
-edges = set()
-for f in pkg.rglob("*.py"):
-    mod = ".".join(f.relative_to(pkg.parent).with_suffix("").parts)
-    for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
-        names = []
-        if isinstance(n, ast.ImportFrom) and n.module:
-            names = [n.module]
-        elif isinstance(n, ast.Import):
-            names = [a.name for a in n.names]
-        for name in names:
-            if name.split(".")[0] == root:
-                a = ".".join(mod.split(".")[:2]); b = ".".join(name.split(".")[:2])
-                if a != b: edges.add((a, b))
-print("flowchart LR")
-for a, b in sorted(edges):
-    print(f'  {a.replace(".","_")}["{a}"] --> {b.replace(".","_")}["{b}"]')
-PY
-```
-
-辺をサブパッケージ粒度に丸めると Component 図として読める。出力の `flowchart LR ...` を ```mermaid フェンスで本文に貼って描画させる。
 
 ## 2. 上位の構成図（意味づけが要るとき・フォールバック）
 

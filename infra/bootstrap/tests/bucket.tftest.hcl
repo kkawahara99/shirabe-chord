@@ -1,5 +1,6 @@
 # 状態ファイル用バケットの構成を確かめる。モックなので AWS の認証情報は要らない。
-# アカウントID・リージョンはデータソースで引くため、override_data で架空の値を入れる（infra/README.md）。
+# アカウントID・リージョンはデータソースで引くため、override_data で架空の値を入れる。`aws_region` は `region` 属性を使う。
+# プロバイダ側の設定の検証（`bucket_namespace` と名前の接尾辞の整合など）はモックでは走らず、実際の plan で初めて分かる。
 
 mock_provider "aws" {
   override_data {

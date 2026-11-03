@@ -12,12 +12,7 @@
 
 ## 構成（予定）
 
-- 静的サイト（S3＋CloudFront）。コード理論と最適化はブラウザの中で動かす（モデルは使わない）
-- 掲載（モード 3）のために、認証・API・データ保存を足す。サーバー側でも同じコアで検証する
-- 実装は TypeScript（[docs/adr/0007](docs/adr/0007-typescript-shared-core.md)）
-- IaC は Terraform（[infra/](infra/README.md)）。Organizations に依存せず、単独のAWSアカウントでも、マルチアカウント環境の1アカウントでも動く
-
-設計判断の理由は [docs/adr/](docs/adr/) にある。
+静的サイト（S3＋CloudFront）で、コード理論と最適化はブラウザの中で動かす。掲載（モード 3）で認証・API・データ保存を足す。実装は TypeScript（[ADR 0007](docs/adr/0007-typescript-shared-core.md)）、IaC は Terraform（[infra/](infra/README.md)）で、Organizations に依存しない。理由は [docs/adr/](docs/adr/)。
 
 ## 開発フロー
 
@@ -35,13 +30,6 @@
 
 検査に引っかかったときは、ファイル名・行番号・ルール番号（禁止語リストの行番号か gitleaks のルールID）だけが出る。一致した語や、禁止語を含むファイル名は出さない（何番目のファイルかだけを出す）。伏せたファイルは本人が確かめる。
 
-この検査では防げないもの:
-
-- cherry-pick と rebase で作られるコミットは、git がフックを呼ばないので検査されない。
-- 禁止語の照合は1行ごとの部分一致で行う。空白や記号で区切った語、行をまたいだ語、ひらがなとカタカナの書き分けは拾わない。
-- 画像とフォント（拡張子で判定）は、バイト列のうち UTF-8 として読める部分だけを照合する。圧縮されたメタデータや UTF-16 で書かれたメタデータは拾わない。それ以外の形式（PDF・書庫・Office 文書など）で文字として読めないファイルは止める。
-- 個人情報の形の検出（gitleaks の独自ルール）は代表的な書き方だけを拾う。UNC（`\\server\…`、`\\wsl$\…`）のパスなどは拾わない。
-- バケット名の中のアカウントIDは、`-<12桁>-<リージョン>-an` の形だけ拾う。それ以外の形は拾わない。
-- `core.hooksPath` は相対パスなので、`.githooks/` が無いブランチや古いコミットを checkout すると、フックは何も言わずに動かなくなる。
+防げないもの（cherry-pick と rebase のコミット、1行ごとの部分一致では拾えない書き方、`core.hooksPath` が効かないブランチなど）は [.githooks/README.md](.githooks/README.md) と [ADR 0004](docs/adr/0004-treat-as-public-from-day-one.md) を参照。
 
 検査そのもののテストは `python -m unittest discover -s .githooks` で流す。

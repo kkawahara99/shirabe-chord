@@ -14,25 +14,13 @@ Terraform のコード。IaC に Terraform を選んだ理由は [ADR 0002](../d
 
 ## テストの書き方
 
-`terraform test`（`tests/*.tftest.hcl`）を使い、`mock_provider "aws"` で AWS の認証情報なしに動かす。モックには次の癖がある。
+`terraform test`（`tests/*.tftest.hcl`）を `mock_provider "aws"` で動かす（認証情報は要らない）。モックの癖は、該当テストのコメントに書く。
 
-- plan の時点では、ARN や ID などの計算される値が不明のまま。それに頼る `assert` は評価できない（`Unknown condition value`）。リソース同士の参照は `.id` ではなく、設定した値の `.bucket` のように plan で分かる属性にする。
-- `aws_iam_policy_document` もプロバイダのデータソースなのでモックされ、`json` が意味のない値になる。IAM やバケットのポリシーは `jsonencode` で書き、ARN は名前などの入力から組み立てる。
-- 計算される値に頼る `assert` は、`mock_provider` の `override_resource`／`override_data` に `override_during = plan` を付けるか、`run` を `command = apply` にして書く（モックなので apply でも AWS には触れない）。
-- `data "aws_caller_identity"` と `data "aws_region"` もモックされるので、`override_data` で架空の値を入れる（`aws_region` は `region`）。架空のアカウントIDは `123456789012`。`run` の中の `override_data` で、そのテストだけ値を差し替えられる。
-- プロバイダ側の設定の検証はモックでは走らない（例: `bucket_namespace` と名前の接尾辞の整合）。実際の plan で初めて分かることがある。
-- タグは `default_tags` で足されないので、タグを付けられるリソースごとに `Project` タグの `assert` を書く（付け忘れに気づけるように）。
-- 入力変数の `validation` は `command = plan` と `expect_failures = [var.<名前>]` で確かめる。`terraform test` に性質テストの仕組みは無いので、境界値の点で書く。
+- plan では ARN や ID などの計算値が不明なので、それに頼る `assert` は `override_resource`／`override_data`（`override_during = plan`）か `command = apply` にする。
+- `aws_iam_policy_document` はモックで中身が空になる。ポリシーは `jsonencode` で書く。
+- プロバイダ側の設定の検証（`bucket_namespace` と名前の接尾辞の整合など）はモックでは走らない。実際の plan で確かめる。
+- リソース同士の参照は `.id` ではなく、plan で分かる `.bucket` のような属性にする。
+- タグは `default_tags` を使わず、リソースごとに `Project` タグの `assert` を書く。
+- アカウントIDの実値は、コミット・Issue・PR に貼らない。バケット名、`terraform output`・`plan` の出力、`backend.app.hcl` の中身にも入っているので、これらも貼らない。架空の値は `123456789012`。
 
-本物のアカウントIDは、コミット・コミットメッセージ・Issue・PR・README の例に書かない。バケット名（アカウントIDが入る）、`terraform output` と `plan` の出力、`backend.app.hcl` の中身も貼らない。
-
-## 検査
-
-リポジトリ直下から次を実行する。AWS の認証情報は要らない。
-
-```sh
-terraform -chdir=infra/bootstrap fmt -check -recursive
-terraform -chdir=infra/bootstrap init -backend=false
-terraform -chdir=infra/bootstrap validate
-terraform -chdir=infra/bootstrap test
-```
+検査コマンドは [CLAUDE.md](../CLAUDE.md) のテストコマンドを参照。
