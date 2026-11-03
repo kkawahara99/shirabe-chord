@@ -1,0 +1,15 @@
+#!/bin/sh
+# 履歴全体（ブランチ・タグ・リモート追跡ブランチ。stash は含めない）を、push 前と同じ基準で再照合する。
+# 禁止語を足した後や、公開する前に流す。違反が無ければ終了コード 0（docs/adr/0011）
+. "$(dirname "$0")/_common.sh"
+
+if [ -z "$(git rev-list --branches --tags --remotes -n 1)" ]; then
+  echo "commit-guard: コミットがまだありません" >&2
+  exit 0
+fi
+
+status=0
+"$PYTHON" "$GUARD" history || status=1
+run_gitleaks git --log-opts="$GL_MERGE_OPT --branches --tags --remotes" "$ROOT" || status=1
+run_gitleaks_messages --branches --tags --remotes || status=1
+exit $status

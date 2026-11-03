@@ -1,0 +1,21 @@
+#!/bin/sh
+# push で送るコミットすべてを検査する: メッセージ・作者とコミッター・パス名と中身・ブランチ名とタグ名（docs/adr/0011）
+# $1 はリモート名（URL で呼ばれたときは範囲を絞れず、全履歴を検査する）。標準入力は
+# `<ローカルref> <ローカルsha> <リモートref> <リモートsha>` の行。
+. "$(dirname "$0")/_common.sh"
+
+status=0
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  # ブランチやタグの削除（ローカル sha がすべて 0）は検査しない
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+
+  # 送る範囲。ここだけで決めて、各検査に同じ値を渡す
+  not_known="--not"
+  known_remotes="--remotes=$1"
+
+  # 子のコマンドが、このループの標準入力を読み取らないようにする
+  "$PYTHON" "$GUARD" range --ref "$remote_ref" -- "$local_sha" "$not_known" "$known_remotes" < /dev/null || status=1
+  run_gitleaks git --log-opts="$GL_MERGE_OPT $local_sha $not_known $known_remotes" "$ROOT" < /dev/null || status=1
+  run_gitleaks_messages "$local_sha" "$not_known" "$known_remotes" < /dev/null || status=1
+done
+exit $status

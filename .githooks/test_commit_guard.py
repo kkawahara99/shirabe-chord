@@ -9,10 +9,15 @@ from commit_guard import (
     Hit,
     Undecodable,
     decode,
+    describe_commit_paths,
     describe_gitleaks_findings,
+    identity_allowed,
     inspect_files,
+    inspect_identities,
+    inspect_ref_names,
     load_denylist,
     normalize,
+    parse_commit,
     parse_denylist,
     matching_rules,
     private_paths,
@@ -314,6 +319,141 @@ class DescribeGitleaksFindingsTest(unittest.TestCase):
 
     def test_禁止語リストが読めなければすべてのパスを伏せる(self):
         self.assertNotIn("docs/a.md", describe_gitleaks_findings(self.findings, None)[0])
+
+
+def random_user() -> str:
+    return "u" + "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+
+
+class IdentityAllowedTest(unittest.TestCase):
+    def test_noreplyのメールのユーザー名と名前が同じなら許す(self):
+        user = random_user()
+        self.assertTrue(identity_allowed(user, f"{user}@users.noreply.github.com"))
+
+    def test_メールの先頭に数字とプラスが付く形も許す(self):
+        user = random_user()
+        self.assertTrue(identity_allowed(user, f"12345+{user}@users.noreply.github.com"))
+
+    def test_大文字小文字は区別しない(self):
+        user = random_user()
+        self.assertTrue(identity_allowed(user.upper(), f"{user}@Users.NoReply.GitHub.com"))
+
+    def test_名前がユーザー名と違えば許さない(self):
+        user = random_user()
+        self.assertFalse(identity_allowed(random_user(), f"{user}@users.noreply.github.com"))
+
+    def test_noreply以外のメールは許さない(self):
+        user = random_user()
+        for email in [
+            f"{user}@example.org",
+            f"{user}@users.noreply.github.com.example.org",
+            f"{user}@noreply.github.com",
+            f"{user}@users.noreply.github.com\n",
+            f"x+{user}@users.noreply.github.com",
+            f"{user}@@users.noreply.github.com",
+            "@users.noreply.github.com",
+            "",
+        ]:
+            with self.subTest(email=email):
+                self.assertFalse(identity_allowed(user, email))
+
+    def test_名前が空なら許さない(self):
+        self.assertFalse(identity_allowed("", "@users.noreply.github.com"))
+
+    def test_GitHubの組はコミッターだけ許す(self):
+        self.assertTrue(identity_allowed("GitHub", "noreply@github.com", committer=True))
+        self.assertFalse(identity_allowed("GitHub", "noreply@github.com"))
+
+    def test_GitHubの組に似た別の組は許さない(self):
+        for name, email in [
+            ("GitHub", "other" + "@github.com"),
+            ("GitHub", "noreply" + "@github.com.example.org"),
+            (random_user(), "noreply@github.com"),
+            ("GitHub ", "noreply@github.com"),
+        ]:
+            with self.subTest(name=name, email=email):
+                self.assertFalse(identity_allowed(name, email, committer=True))
+
+
+class ParseCommitTest(unittest.TestCase):
+    raw = (
+        b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n"
+        b"parent 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n"
+        b"author Some One <one@example.org> 1700000000 +0900\n"
+        b"committer GitHub <noreply@github.com> 1700000001 +0000\n"
+        b"gpgsig -----BEGIN PGP SIGNATURE-----\n \n abc\n -----END PGP SIGNATURE-----\n"
+        b"\n"
+        b"docs: subject\n\nbody\n\ntrailer: value\n"
+    )
+
+    def test_作者とコミッターとメッセージに分ける(self):
+        commit = parse_commit(self.raw)
+        self.assertEqual(commit.author, ("Some One", "one@example.org"))
+        self.assertEqual(commit.committer, ("GitHub", "noreply@github.com"))
+        self.assertEqual(commit.message, b"docs: subject\n\nbody\n\ntrailer: value\n")
+
+    def test_メッセージが空でも読める(self):
+        commit = parse_commit(self.raw.split(b"\n\n")[0] + b"\n\n")
+        self.assertEqual(commit.message, b"")
+
+
+class InspectIdentitiesTest(unittest.TestCase):
+    @staticmethod
+    def commit(author: str, committer: str):
+        return parse_commit(f"author {author} 1 +0000\ncommitter {committer} 1 +0000\n\nmsg\n".encode())
+
+    def test_問題のある側だけを短縮ハッシュ付きで示し名前とメールは出さない(self):
+        user = random_user()
+        commit = self.commit(f"{user} <{user}@users.noreply.github.com>", "Real Name <real@example.org>")
+        lines = inspect_identities("abcd1234", commit)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("abcd1234 コミッター"))
+        for shown in ["Real Name", "real@example.org", "real"]:
+            self.assertNotIn(shown, lines[0])
+
+    def test_GitHubの組のコミッターは問題にしない(self):
+        user = random_user()
+        commit = self.commit(f"{user} <{user}@users.noreply.github.com>", "GitHub <noreply@github.com>")
+        self.assertEqual(inspect_identities("abcd1234", commit), [])
+
+    def test_禁止語と同じユーザー名でも照合しない(self):
+        # 禁止語の照合は、ここでは呼ばない（公開してよいユーザー名が入るため）
+        who = "zqsecret <zqsecret@users.noreply.github.com>"
+        self.assertEqual(inspect_identities("abcd1234", self.commit(who, who)), [])
+
+
+class DescribeCommitPathsTest(unittest.TestCase):
+    rules = parse_denylist("examplecorp\n")
+
+    def test_禁止語に一致しないパス名は問題にしない(self):
+        self.assertEqual(describe_commit_paths("abcd1234", ["docs/a.md", "b.txt"], self.rules), [])
+
+    def test_一致したパス名は伏せて何番目かだけを示す(self):
+        lines = describe_commit_paths("abcd1234", ["docs/a.md", "docs/ExampleCorp.md"], self.rules)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("abcd1234 の 2 番目のファイル"))
+        self.assertTrue(lines[0].endswith("のパス名: 禁止語ルール 1"))
+        self.assertNotIn("xamplecorp", normalize(lines[0]))
+
+    def test_区切りを入れたパス名も伏せる(self):
+        lines = describe_commit_paths("abcd1234", ["docs/Example-Corp.md"], self.rules)
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn("Example", lines[0])
+
+
+class InspectRefNamesTest(unittest.TestCase):
+    rules = parse_denylist("examplecorp\n")
+
+    def test_一致したrefは名前を出さずブランチかタグかだけを示す(self):
+        lines = inspect_ref_names(["refs/heads/main", "refs/tags/v-ExampleCorp", "refs/heads/ExampleCorp"], self.rules)
+        self.assertEqual(len(lines), 2)
+        self.assertIn("送るタグ", lines[0])
+        self.assertIn("送るブランチ", lines[1])
+        self.assertIn("禁止語ルール 1", lines[0])
+        self.assertNotIn("xamplecorp", normalize("".join(lines)))
+
+    def test_一致しなければ何も返さない(self):
+        self.assertEqual(inspect_ref_names(["refs/heads/main"], self.rules), [])
 
 
 if __name__ == "__main__":

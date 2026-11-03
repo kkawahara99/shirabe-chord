@@ -2,6 +2,8 @@
 
 - `private/` 配下のファイルがステージされていたら拒否する（docs/adr/0004）。
 - ステージされた内容・パス名とコミットメッセージを、禁止語リストと照合する（docs/adr/0004）。
+- push する範囲のコミットと履歴全体を、同じ基準で検査する（docs/adr/0011）。
+  メッセージ・作者とコミッター・追加されたファイルのパス名と中身・ref 名が対象。
 - gitleaks の検出結果を、一致した語を出さない形で表示する。
 
 一致した語は出力しない。出すのはファイル名・行番号・ルール番号（禁止語リストの行番号）だけにし、
@@ -14,12 +16,13 @@ import argparse
 import codecs
 import json
 import os
+import re
 import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Iterable, Optional, Sequence
+from typing import Callable, Iterable, NamedTuple, Optional, Sequence
 
 DENYLIST_ENV = "SHIRABE_CHORD_DENYLIST"
 DEFAULT_DENYLIST = PurePosixPath("private", "denylist.txt")
@@ -38,6 +41,16 @@ KANA_OFFSET = 0x60
 # 区切りを取り除いた照合に使う語の最短の長さ（取り除いた後）。短い語は単語をまたぐ偶然の一致が多すぎる
 MIN_LOOSE_LENGTH_ASCII = 3
 MIN_LOOSE_LENGTH_NON_ASCII = 2
+SHORT_HASH_LENGTH = 8
+# 履歴全体の再照合の対象。refs/stash は含めない（公開されない）
+HISTORY_REVS = ("--branches", "--tags", "--remotes")
+# 先頭の `<数字>+` も許す。GitHub のユーザー名に `+` は使えない
+NOREPLY_EMAIL = re.compile(r"(?:\d+\+)?([^@\s<>+]+)@users\.noreply\.github\.com", re.IGNORECASE)
+# GitHub の Web 画面でマージしたときのコミッター（メールは小文字にして比べる）
+GITHUB_COMMITTER = ("GitHub", "noreply@github.com")
+IDENTITY_HINT = "<ユーザー名>@users.noreply.github.com の形のメールと、そのユーザー名と同じ名前"
+IDENT_LINE = re.compile(rb"(author|committer) (.*) <([^<>]*)> \d+ [+-]\d{4}")
+OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 EXIT_OK = 0
 EXIT_VIOLATION = 1
@@ -192,15 +205,24 @@ def display_path(path: str, index: int, rules: Sequence[Rule]) -> str:
     return masked_label(index) if matching_rules(path, rules) else path
 
 
-def inspect_files(files: Sequence[tuple[str, Optional[bytes]]], rules: Sequence[Rule]) -> list[str]:
-    """ステージされたファイル（パスと中身）を照合し、表示してよい形の指摘を返す。
+def inspect_files(
+    files: Sequence[tuple[str, Optional[bytes]]],
+    rules: Sequence[Rule],
+    *,
+    labeler: Optional[Callable[[int, str], str]] = None,
+    check_path: bool = True,
+) -> list[str]:
+    """ファイル（パスと中身）を照合し、表示してよい形の指摘を返す。
 
     中身が None のもの（サブモジュール）はパス名だけを照合する。
+    labeler は表示する場所の名前（引数は何番目かとパス）。無ければ、パスを（必要なら伏せて）出す。
+    check_path=False は、パス名を別に照合済みのとき（パスは画像かどうかの判別にだけ使う）。
     """
     problems: list[object] = []
     for index, (path, data) in enumerate(files, start=1):
-        label = display_path(path, index, rules)
-        problems.extend(Hit(label, None, number) for number in matching_rules(path, rules))
+        label = labeler(index, path) if labeler else display_path(path, index, rules)
+        if check_path:
+            problems.extend(Hit(label, None, number) for number in matching_rules(path, rules))
         if data is None:
             continue
         if PurePosixPath(path).suffix.casefold() in RAW_SCAN_SUFFIXES:
@@ -234,8 +256,79 @@ def describe_gitleaks_findings(findings: Sequence[dict], rules: Optional[Sequenc
             where = "（パス名を伏せたファイル）"
         else:
             where = path
-        lines.append(f"{where}:{finding.get('StartLine')}: gitleaks ルール {finding.get('RuleID')}")
+        commit = (finding.get("Commit") or "")[:SHORT_HASH_LENGTH]
+        prefix = f"{commit} " if commit else ""
+        lines.append(f"{prefix}{where}:{finding.get('StartLine')}: gitleaks ルール {finding.get('RuleID')}")
     return lines
+
+
+def identity_allowed(name: str, email: str, committer: bool = False) -> bool:
+    """作者・コミッターの名前とメールが、公開してよい GitHub のユーザー名の形か。
+
+    メールが `<ユーザー名>@users.noreply.github.com`（先頭の `<数字>+` は可）で、名前がそのユーザー名と同じ
+    （大文字小文字は区別しない）。コミッターだけは、GitHub の Web 画面でマージしたときの組も許す。
+    """
+    match = NOREPLY_EMAIL.fullmatch(email)
+    if match and match.group(1).casefold() == name.casefold():
+        return True
+    return committer and (name, email.casefold()) == GITHUB_COMMITTER
+
+
+class Commit(NamedTuple):
+    author: tuple[str, str]  # 名前, メール
+    committer: tuple[str, str]
+    message: bytes  # コミット時の文字コードのまま
+
+
+def parse_commit(raw: bytes) -> Commit:
+    """`git cat-file commit` の出力を、作者・コミッター・メッセージに分ける。"""
+    head, _, message = raw.partition(b"\n\n")
+    idents = {"author": ("", ""), "committer": ("", "")}
+    for line in head.split(b"\n"):
+        match = IDENT_LINE.fullmatch(line)
+        if match:
+            role, name, email = (g.decode("utf-8", errors="replace") for g in match.groups())
+            idents[role] = (name, email)
+    return Commit(idents["author"], idents["committer"], message)
+
+
+def inspect_identities(short: str, commit: Commit) -> list[str]:
+    """名前とメールは出さない。公開してよいユーザー名が入る欄なので、禁止語の照合はかけない。"""
+    return [
+        f"{short} {role}: 名前とメールが、{IDENTITY_HINT}ではありません（名前とメールは伏せる）"
+        for role, (name, email), is_committer in (
+            ("作者", commit.author, False),
+            ("コミッター", commit.committer, True),
+        )
+        if not identity_allowed(name, email, committer=is_committer)
+    ]
+
+
+def describe_commit_paths(short: str, paths: Iterable[str], rules: Sequence[Rule]) -> list[str]:
+    """コミットで追加・変更されたパス名を照合する。一致したパス名は伏せ、何番目かだけを示す。"""
+    lines = []
+    for index, path in enumerate(dict.fromkeys(paths), start=1):
+        label = f"{short} の {index} 番目のファイル（パス名に禁止語があるため伏せる）"
+        lines.extend(str(Hit(label, None, number)) for number in matching_rules(path, rules))
+    return lines
+
+
+def inspect_ref_names(refs: Iterable[str], rules: Sequence[Rule]) -> list[str]:
+    """ref の名前を照合する。名前は伏せ、ブランチかタグかだけを示す（pre-push は ref を 1 つずつ渡すので番号は使えない）。"""
+    kinds = (("refs/heads/", "ブランチ"), ("refs/tags/", "タグ"))
+    return [
+        f"送る{next((kind for prefix, kind in kinds if ref.startswith(prefix)), ' ref')}の名前に禁止語があります（名前は伏せる）: 禁止語ルール {number}"
+        for ref in refs
+        for number in matching_rules(ref, rules)
+    ]
+
+
+def message_text(message: bytes) -> str:
+    """gitleaks に渡す用。文字コードを判別できなくても止めず、読める範囲で渡す。"""
+    try:
+        return decode(message)
+    except Undecodable:
+        return message.decode("utf-8", errors="replace")
 
 
 def _git(*args: str) -> bytes:
@@ -262,6 +355,50 @@ def staged_modes() -> dict[str, str]:
             meta, path = entry.split(b"\t", 1)
             modes[path.decode("utf-8")] = meta.split()[0].decode("ascii")
     return modes
+
+
+def commits_in(revs: Sequence[str]) -> list[str]:
+    return _git("rev-list", *revs).decode("ascii").split()
+
+
+def commit_paths(commit: str) -> list[str]:
+    """コミットで追加・変更・リネーム・コピー・型変更されたパス名。マージコミットは親ごとの差分を見る。"""
+    out = _git(
+        "diff-tree", "-r", "--root", "-m", "--no-commit-id",
+        f"--diff-filter={INSPECTED_CHANGES}", "--name-only", "-z", commit,
+    )
+    return [p.decode("utf-8", errors="replace") for p in out.split(b"\0") if p]
+
+
+def _git_with_input(args: Sequence[str], text: str) -> bytes:
+    return subprocess.run(["git", *args], input=text.encode("ascii"), check=True, capture_output=True).stdout
+
+
+def new_blobs(revs: Sequence[str]) -> list[tuple[str, str, bytes]]:
+    """範囲で新しく入るファイルの（オブジェクトID, パス, 中身）。
+
+    同じ中身は1つにまとまり、パスはそのうちの1つ（リネームの新しい名前は commit_paths で見る）。
+    """
+    paths: dict[str, str] = {}
+    for line in _git("rev-list", "--objects", *revs).decode("utf-8", errors="replace").splitlines():
+        object_id, _, path = line.partition(" ")
+        if OBJECT_ID.fullmatch(object_id) and path:
+            paths.setdefault(object_id, path)
+    if not paths:
+        return []
+    types = _git_with_input(["cat-file", "--batch-check=%(objecttype) %(objectname)"], "\n".join(paths) + "\n")
+    blob_ids = [line.split()[1] for line in types.decode("ascii").splitlines() if line.startswith("blob ")]
+    if not blob_ids:
+        return []
+    out = _git_with_input(["cat-file", "--batch"], "\n".join(blob_ids) + "\n")
+    blobs, pos = [], 0
+    for _ in blob_ids:
+        header_end = out.index(b"\n", pos)
+        object_id, _type, size = out[pos:header_end].decode("ascii").split()
+        start = header_end + 1
+        blobs.append((object_id, paths[object_id], out[start : start + int(size)]))
+        pos = start + int(size) + 1
+    return blobs
 
 
 def denylist_path() -> Path:
@@ -339,7 +476,50 @@ def check_message(message_file: Path) -> int:
     return EXIT_OK
 
 
-def report_gitleaks(report_file: Path) -> int:
+def check_commits(revs: Sequence[str], refs: Sequence[str], title: str) -> int:
+    """範囲 revs のコミットすべてと、送る ref の名前を検査する。"""
+    try:
+        rules = _load_rules()
+    except DenylistUnavailable:
+        return EXIT_SETUP_ERROR
+
+    problems: list[object] = list(inspect_ref_names(refs, rules))
+    for commit_id in commits_in(revs):
+        short = commit_id[:SHORT_HASH_LENGTH]
+        commit = parse_commit(_git("cat-file", "commit", commit_id))
+        problems.extend(inspect_identities(short, commit))
+        try:
+            text = decode(commit.message)
+        except Undecodable:
+            problems.append(f"{short} コミットメッセージの文字コードを判別できないため検査できません")
+        else:
+            problems.extend(scan_text(f"{short} {MESSAGE_LOCATION}", text, rules))
+        problems.extend(describe_commit_paths(short, commit_paths(commit_id), rules))
+
+    blobs = new_blobs(revs)
+    blob_problems = inspect_files(
+        [(path, data) for _id, path, data in blobs],
+        rules,
+        labeler=lambda index, _path: f"blob {blobs[index - 1][0][:SHORT_HASH_LENGTH]}",
+        check_path=False,  # パス名はコミットごとに照合済み
+    )
+    problems.extend(blob_problems)
+    if not problems:
+        return EXIT_OK
+    if blob_problems:
+        problems.append("blob は git log --all --find-object=<ハッシュ> で、入れたコミットを探せる")
+    _report(title, problems)
+    return EXIT_VIOLATION
+
+
+def print_messages(revs: Sequence[str]) -> int:
+    """範囲のコミットメッセージを、gitleaks stdin に渡す1つの入力にして標準出力へ出す。"""
+    texts = [message_text(parse_commit(_git("cat-file", "commit", c)).message) for c in commits_in(revs)]
+    sys.stdout.buffer.write("\n\n".join(texts).encode("utf-8"))
+    return EXIT_OK
+
+
+def report_gitleaks(report_file: Path, label: str = "") -> int:
     try:
         findings = json.loads(report_file.read_text(encoding="utf-8") or "null")
     except (OSError, ValueError):
@@ -352,7 +532,8 @@ def report_gitleaks(report_file: Path) -> int:
         rules: Optional[list[Rule]] = load_denylist(denylist_path())
     except DenylistUnavailable:
         rules = None
-    _report("秘密情報・個人情報の形が含まれています（gitleaks）", describe_gitleaks_findings(findings, rules))
+    title = "秘密情報・個人情報の形が含まれています（gitleaks）"
+    _report(f"{label}: {title}" if label else title, describe_gitleaks_findings(findings, rules))
     return EXIT_VIOLATION
 
 
@@ -367,6 +548,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     message.add_argument("file", type=Path)
     gitleaks = sub.add_parser("gitleaks-report", help="gitleaks の JSON レポートを、語を出さない形で表示する")
     gitleaks.add_argument("file", type=Path)
+    gitleaks.add_argument("--label", default="", help="どのコミットの結果かを示す見出し")
+    pushed = sub.add_parser("range", help="push する範囲のコミットを検査する（pre-push）。rev-list の引数は -- の後ろに渡す")
+    pushed.add_argument("--ref", action="append", default=[], help="送る ref の名前")
+    pushed.add_argument("revs", nargs="+")
+    sub.add_parser("history", help="履歴全体（ブランチ・タグ・リモート追跡ブランチ）を再照合する（scan-history）")
+    messages = sub.add_parser("messages", help="範囲のコミットメッセージを1つにまとめて出す（gitleaks stdin に渡す用）")
+    messages.add_argument("revs", nargs="+")
     args = parser.parse_args(argv)
 
     try:
@@ -374,7 +562,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             return check_staged()
         if args.command == "message":
             return check_message(args.file)
-        return report_gitleaks(args.file)
+        if args.command == "gitleaks-report":
+            return report_gitleaks(args.file, args.label)
+        if args.command == "range":
+            return check_commits(args.revs, args.ref, "送るコミットに問題があります。push できません")
+        if args.command == "history":
+            return check_commits(HISTORY_REVS, [], "履歴に問題があります")
+        return print_messages(args.revs)
     except subprocess.CalledProcessError as e:
         # 引数にパス名が入るので、コマンドの内容は出さない
         _report("git の実行に失敗したため止めます", [f"終了コード {e.returncode}"])

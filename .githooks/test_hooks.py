@@ -18,7 +18,8 @@ from commit_guard import normalize, strip_separators
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COPIED = [".githooks", ".gitleaks.toml", ".gitignore"]
-HOOKS = ["pre-commit", "commit-msg", "pre-merge-commit"]
+HOOKS = ["pre-commit", "commit-msg", "pre-merge-commit", "pre-push"]
+SCRIPTS = [*HOOKS, "scan-history"]
 
 
 def _gitleaks() -> str:
@@ -329,6 +330,7 @@ class GitleaksHookTest(HookTestCase):
         backslash = "\\"
         cases = [
             ("email-address", "連絡先 someone" + "@gmail.com"),
+            ("email-address", "other" + "@github.com"),
             ("jp-phone-number", "電話 090" + "-1234-5678"),
             ("jp-postal-code", "〒100" + "-0001"),
             ("aws-arn-with-account", f"arn:aws:iam::{account}:role/x"),
@@ -407,6 +409,7 @@ class GitleaksHookTest(HookTestCase):
             "\n".join(
                 [
                     "例 someone" + "@example.com / git" + "@github.com / icon" + "@2x.png",
+                    "noreply" + "@github.com / NoReply" + "@GitHub.com",
                     "1" + "@users.noreply.github.com",
                     "arn:aws:iam::123456789012:role/x / account_id = 123456789012",
                     "arn:aws:s3:::my-bucket/key",
@@ -446,14 +449,343 @@ class MergeHookTest(HookTestCase):
         self.assertEqual(self.git("rev-list", "--count", "HEAD").stdout.strip(), "1")
 
 
+class PushTestCase(HookTestCase):
+    """リモート役のベアリポジトリを持つ。違反するコミットは、検査を外して作る。"""
+
+    def setUp(self):
+        super().setUp()
+        self.remote = self.tmp / "remote.git"
+        subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(self.remote)], check=True, env=self.env)
+        self.git("remote", "add", "origin", str(self.remote))
+        self.no_hooks = ["-c", f"core.hooksPath={self.tmp / 'no-hooks'}"]
+
+    def commit_file(self, rel="note.md", content="ok\n", message="docs: テスト", bypass=False, config=(), extra=()):
+        self.stage(rel, content)
+        flags = [*self.no_hooks] if bypass else []
+        for item in config:
+            flags += ["-c", item]
+        self.assert_passed(self.git(*flags, "commit", "-q", "-m", message, *extra))
+        return self.sha()
+
+    def sha(self, rev="HEAD"):
+        return self.git("rev-parse", rev).stdout.strip()
+
+    def short(self, rev="HEAD"):
+        return self.sha(rev)[:8]
+
+    def push(self, *args, remote="origin", bypass=False):
+        flags = [*self.no_hooks] if bypass else []
+        return self.git(*flags, "push", "-q", remote, *args)
+
+    def remote_sha(self, ref="refs/heads/main"):
+        result = subprocess.run(
+            ["git", "-C", str(self.remote), "rev-parse", "--verify", "-q", ref], capture_output=True, text=True
+        )
+        return result.stdout.strip() or None
+
+    def assert_pushed(self, result, ref="refs/heads/main"):
+        self.assert_passed(result)
+        self.assertEqual(self.remote_sha(ref), self.sha(ref))
+
+    def assert_push_blocked(self, result, ref="refs/heads/main", before=None):
+        self.assertNotEqual(result.returncode, 0, self.output(result))
+        self.assertEqual(self.remote_sha(ref), before, "push が通ってしまった")
+
+    def set_denylist(self, *terms):
+        self.denylist.write_text("# テスト用\n" + "".join(f"{t}\n" for t in terms), encoding="utf-8")
+
+    def ident(self, name, email):
+        return [f"user.name={name}", f"user.email={email}"]
+
+
+class PrePushHookTest(PushTestCase):
+    def test_検査を通るコミットはpushできる(self):
+        self.commit_file(message="docs: 追加\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+        self.assert_pushed(self.push("main"))
+
+    def test_ブランチの削除のpushは検査しない(self):
+        self.commit_file()
+        self.assert_passed(self.push("main", "main:refs/heads/other"))
+        self.assertEqual(self.remote_sha("refs/heads/other"), self.sha())
+        self.denylist.unlink()
+        result = self.push("--delete", "other")
+        self.assert_passed(result)
+        self.assertIsNone(self.remote_sha("refs/heads/other"))
+
+    def test_cherry_pickで作った禁止語入りコミットのpushが止まり語を出さない(self):
+        self.set_denylist("unrelated-term")
+        self.commit_file("base.md")
+        self.assert_pushed(self.push("main"))
+        self.git("switch", "-q", "-c", "feature")
+        self.commit_file("leak.md", f"ok\n{self.term}\n")
+        self.git("switch", "-q", "main")
+        self.set_denylist(self.term)  # 禁止語は後から足された
+        self.assert_passed(self.git("cherry-pick", "feature"))  # フックは呼ばれない
+
+        before = self.remote_sha()
+        result = self.push("main")
+        self.assert_push_blocked(result, before=before)
+        self.assertIn(f"blob {self.sha('HEAD:leak.md')[:8]}:2: 禁止語ルール 2", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_rebaseで作った禁止語入りコミットのpushが止まり語を出さない(self):
+        self.set_denylist("unrelated-term")
+        self.commit_file("base.md")
+        self.assert_pushed(self.push("main"))
+        self.git("switch", "-q", "-c", "feature")
+        self.commit_file("leak.md", f"ok\n{self.term}\n")
+        self.git("switch", "-q", "main")
+        self.commit_file("next.md")
+        self.set_denylist(self.term)
+        self.git("switch", "-q", "feature")
+        self.assert_passed(self.git("rebase", "main"))  # フックは呼ばれない
+
+        result = self.push("feature")
+        self.assert_push_blocked(result, "refs/heads/feature")
+        self.assertIn("禁止語ルール 2", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_リネームだけで禁止語入りのパス名に変えたコミットのpushが止まりパス名を出さない(self):
+        self.commit_file("docs/old.md")
+        self.assert_pushed(self.push("main"))
+        before = self.remote_sha()
+        self.assert_passed(self.git("mv", "docs/old.md", f"docs/{self.term}.md"))
+        self.assert_passed(self.git(*self.no_hooks, "commit", "-q", "-m", "docs: 名前を変える"))
+
+        result = self.push("main")
+        self.assert_push_blocked(result, before=before)
+        self.assertIn(f"{self.short()} の 1 番目のファイル", self.output(result))
+        self.assertIn("のパス名: 禁止語ルール 2", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_コミットメッセージの禁止語でpushが止まり短縮ハッシュと行番号だけ出る(self):
+        self.commit_file(message=f"docs: {self.term}の件", bypass=True)
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assertIn(f"{self.short()} コミットメッセージ:1: 禁止語ルール 2", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_コミットメッセージの秘密情報でpushが止まり短縮ハッシュで特定される(self):
+        token = _fake_github_token()
+        before = self.commit_file("a.md", message="docs: 問題なし")
+        leaky = self.commit_file("b.md", message=f"chore: token {token}", bypass=True)
+        after = self.commit_file("c.md", message="docs: これも問題なし")
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assert_gitleaks_rule(result, "github-pat")
+        self.assertIn(leaky[:8], self.output(result))
+        # 特定は、そのコミット 1 つのメッセージだけを流し直す（前後のコミットは出ない）
+        self.assertNotIn(before[:8], self.output(result))
+        self.assertNotIn(after[:8], self.output(result))
+        self.assertNotIn(token, self.output(result))
+
+    def test_マージの解決で入った秘密情報でpushが止まる(self):
+        token = _fake_github_token()
+        self.commit_file("base.md")
+        self.git("switch", "-q", "-c", "side")
+        self.commit_file("side.md")
+        self.git("switch", "-q", "main")
+        self.commit_file("main.md")
+        self.assert_passed(self.git(*self.no_hooks, "merge", "--no-commit", "--no-ff", "side"))
+        self.write("evil.txt", f"token = {token}\n")
+        self.git("add", "--", "evil.txt")
+        self.assert_passed(self.git(*self.no_hooks, "commit", "-q", "-m", "chore: マージ"))
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assert_gitleaks_rule(result, "github-pat")
+        self.assertNotIn(token, self.output(result))
+
+    def test_追加された中身の秘密情報でpushが止まる(self):
+        token = _fake_github_token()
+        self.commit_file("config.txt", f"token = {token}\n", bypass=True)
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assert_gitleaks_rule(result, "github-pat")
+        self.assertNotIn(token, self.output(result))
+
+    def test_範囲の途中のコミットの違反でも止まる(self):
+        self.commit_file("a.md")
+        middle = self.commit_file("b.md", message=f"docs: {self.term}", bypass=True)
+        self.commit_file("c.md")
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assertIn(f"{middle[:8]} コミットメッセージ:1: 禁止語ルール 2", self.output(result))
+        self.assertNotIn(self.short(), self.output(result))
+
+    def test_作者が許す形でないコミットで止まり名前とメールを出さない(self):
+        name, email = "Zz" + secrets.token_hex(4), "zz" + secrets.token_hex(4) + "@example.org"
+        self.commit_file(extra=["--author", f"{name} <{email}>"])
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assertIn(f"{self.short()} 作者", self.output(result))
+        for secret in [name, email, email.split("@")[0]]:
+            self.assertNotIn(secret, self.output(result))
+
+    def test_コミッターが許す形でないコミットで止まり名前とメールを出さない(self):
+        name, email = "Zz" + secrets.token_hex(4), "zz" + secrets.token_hex(4) + "@example.org"
+        self.commit_file(config=self.ident(name, email), extra=["--author", "test <test@users.noreply.github.com>"])
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assertIn(f"{self.short()} コミッター", self.output(result))
+        for secret in [name, email, email.split("@")[0]]:
+            self.assertNotIn(secret, self.output(result))
+
+    def test_名前とメールのユーザー名が違うコミットで止まる(self):
+        self.commit_file(config=self.ident("other", "test@users.noreply.github.com"))
+        self.assert_push_blocked(self.push("main"))
+
+    def test_数字付きのnoreplyと名前の大文字小文字違いは通る(self):
+        cases = [("TEST", "12345+test@users.noreply.github.com"), ("test", "Test@Users.NoReply.GitHub.com")]
+        for i, (name, email) in enumerate(cases):
+            with self.subTest(name=name, email=email):
+                self.commit_file(f"n{i}.md", config=self.ident(name, email))
+                self.assert_pushed(self.push("main"))
+
+    def test_コミッターがGitHubの組なら通り作者がその組なら止まる(self):
+        github = self.ident("GitHub", "noreply@github.com")
+        self.commit_file("a.md", config=github, extra=["--author", "test <test@users.noreply.github.com>"])
+        self.assert_pushed(self.push("main"))
+
+        before = self.remote_sha()
+        self.commit_file("b.md", config=github)
+        self.assert_push_blocked(self.push("main"), before=before)
+
+    def test_GitHubの組に似た別の組のコミッターは止まる(self):
+        author = ["--author", "test <test@users.noreply.github.com>"]
+        self.commit_file("base.md")
+        self.assert_pushed(self.push("main"))
+        before = self.remote_sha()
+        for name, email in [("GitHub", "other" + "@github.com"), ("someone", "noreply@github.com")]:
+            with self.subTest(name=name, email=email):
+                self.commit_file("x.md", config=self.ident(name, email), extra=author)
+                self.assert_push_blocked(self.push("main"), before=before)
+                self.git("reset", "-q", "--hard", "HEAD~1")
+
+    def test_作者とコミッターの行には禁止語の照合をかけない(self):
+        self.commit_file(config=self.ident(self.term, f"{self.term}@users.noreply.github.com"))
+        self.assert_pushed(self.push("main"))
+
+    def test_禁止語を含むブランチ名のpushが止まり名前を出さない(self):
+        self.commit_file()
+        self.git("switch", "-q", "-c", f"feature/{self.term}")
+        result = self.push(f"feature/{self.term}")
+        self.assert_push_blocked(result, f"refs/heads/feature/{self.term}")
+        self.assertIn("禁止語ルール 2", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_禁止語を含むタグ名のpushが止まり名前を出さない(self):
+        self.commit_file()
+        self.git("tag", f"v-{self.term}")
+        result = self.push(f"v-{self.term}")
+        self.assert_push_blocked(result, f"refs/tags/v-{self.term}")
+        self.assertIn("禁止語ルール 2", self.output(result))
+        self.assert_term_hidden(result)
+
+    def test_すでにリモートにあるコミットは再検査しない(self):
+        self.commit_file("bad.md", f"{self.term}\n", bypass=True)
+        self.assert_pushed(self.push("main", bypass=True))
+        self.commit_file("good.md")
+        self.assert_pushed(self.push("main"))
+
+    def test_リモートをURLで指定したpushは範囲を絞れず全履歴を検査する(self):
+        self.commit_file("bad.md", f"{self.term}\n", bypass=True)
+        self.assert_pushed(self.push("main", bypass=True))
+        self.commit_file("good.md")
+        before = self.remote_sha()
+        result = self.push("main", remote=str(self.remote))
+        self.assert_push_blocked(result, before=before)
+        self.assert_denylist_rule(result, f"blob {self.sha('HEAD~1:bad.md')[:8]}:1")
+
+    def test_禁止語リストが無ければpushが止まる(self):
+        self.commit_file()
+        self.denylist.unlink()
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assertIn("禁止語リストがありません", self.output(result))
+
+    def test_gitleaksが無ければpushが止まる(self):
+        self.commit_file()
+        self.env["GITLEAKS"] = "gitleaks-does-not-exist"
+        result = self.push("main")
+        self.assert_push_blocked(result)
+        self.assertIn("gitleaks が見つかりません", self.output(result))
+
+
+class ScanHistoryTest(PushTestCase):
+    def scan(self):
+        # sh の場所に頼らないよう、git のエイリアスとして（git 付属の sh で）動かす
+        return self.git("-c", "alias.scanhist=!sh .githooks/scan-history", "scanhist")
+
+    def test_違反が無ければ終了コード0(self):
+        self.commit_file("a.md")
+        self.commit_file("b.md")
+        self.assert_passed(self.scan())
+
+    def test_履歴の違反を報告し語も名前も出さない(self):
+        token = _fake_github_token()
+        name = "Zz" + secrets.token_hex(4)
+        self.commit_file("content.md", f"{self.term}\n", bypass=True)
+        self.commit_file(f"{self.term}.md", bypass=True)
+        self.commit_file("m.md", message=f"chore: token {token}", bypass=True)
+        self.commit_file("a.md", config=self.ident(name, "zz@example.org"))
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, self.output(result))
+        out = self.output(result)
+        self.assertIn(f"blob {self.sha('HEAD~3:content.md')[:8]}:1: 禁止語ルール 2", out)
+        self.assertIn("のパス名: 禁止語ルール 2", out)
+        self.assert_gitleaks_rule(result, "github-pat")
+        self.assertIn(f"{self.short()} 作者", out)
+        self.assert_term_hidden(result)
+        self.assertNotIn(token, out)
+        self.assertNotIn(name, out)
+
+    def test_現在のブランチ以外のブランチにだけあるコミットも拾う(self):
+        self.commit_file("a.md")
+        self.git("switch", "-q", "-c", "side")
+        self.commit_file("b.md", message=f"docs: {self.term}", bypass=True)
+        self.git("switch", "-q", "main")
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, self.output(result))
+        self.assert_denylist_rule(result, f"{self.short('side')} コミットメッセージ:1")
+
+    def test_タグにだけあるコミットも拾う(self):
+        self.commit_file("a.md")
+        self.git("switch", "-q", "--detach")
+        self.commit_file("b.md", message=f"docs: {self.term}", bypass=True)
+        self.git("tag", "only-tag")
+        self.git("switch", "-q", "main")
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, self.output(result))
+        self.assert_denylist_rule(result, f"{self.short('only-tag')} コミットメッセージ:1")
+
+    def test_リモート追跡ブランチにだけあるコミットも拾う(self):
+        self.commit_file("a.md")
+        self.git("switch", "-q", "-c", "side")
+        self.commit_file("b.md", message=f"docs: {self.term}", bypass=True)
+        self.assert_passed(self.push("side", bypass=True))
+        bad = self.short()
+        self.git("switch", "-q", "main")
+        self.git("branch", "-q", "-D", "side")
+        result = self.scan()
+        self.assertNotEqual(result.returncode, 0, self.output(result))
+        self.assert_denylist_rule(result, f"{bad} コミットメッセージ:1")
+
+    def test_stashの中だけにある違反は出ない(self):
+        self.commit_file("a.md")
+        self.write("a.md", f"{self.term}\ntoken = {_fake_github_token()}\n")
+        self.assert_passed(self.git("stash", "push", "-q"))
+        self.assert_passed(self.git("rev-parse", "--verify", "-q", "refs/stash"))
+        self.assert_passed(self.scan())
+
+
 class TrackedModeTest(unittest.TestCase):
     def test_フックが実行権付きでリポジトリに記録されている(self):
         listed = subprocess.run(
-            ["git", "ls-files", "-s", "--", *(f".githooks/{h}" for h in HOOKS)],
+            ["git", "ls-files", "-s", "--", *(f".githooks/{h}" for h in SCRIPTS)],
             cwd=REPO_ROOT, capture_output=True, text=True, check=True,
         ).stdout.splitlines()
         modes = {line.split("\t")[1]: line.split()[0] for line in listed}
-        self.assertEqual(modes, {f".githooks/{h}": "100755" for h in HOOKS})
+        self.assertEqual(modes, {f".githooks/{h}": "100755" for h in SCRIPTS})
 
 
 if __name__ == "__main__":
