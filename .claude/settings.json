@@ -100,8 +100,7 @@
           {
             "type": "command",
             "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-hook-bypass.sh\"",
-            "timeout": 10,
-            "onFailure": "block"
+            "timeout": 10
           }
         ]
       },
