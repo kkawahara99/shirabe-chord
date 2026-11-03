@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Optional, Sequence
 
@@ -33,6 +33,11 @@ GITLINK_MODE = "160000"
 # 文字として読めても、これ以上の割合で制御文字・未割り当て・私用の文字があればバイナリとみなす
 MAX_NON_TEXT_RATIO = 0.02
 MESSAGE_LOCATION = "コミットメッセージ"
+# ひらがな（U+3041〜3096・踊り字 U+309D〜309E）とカタカナ（U+30A1〜30F6・U+30FD〜30FE）の距離
+KANA_OFFSET = 0x60
+# 区切りを取り除いた照合に使う語の最短の長さ（取り除いた後）。短い語は単語をまたぐ偶然の一致が多すぎる
+MIN_LOOSE_LENGTH_ASCII = 3
+MIN_LOOSE_LENGTH_NON_ASCII = 2
 
 EXIT_OK = 0
 EXIT_VIOLATION = 1
@@ -51,6 +56,13 @@ class Undecodable(Exception):
 class Rule:
     number: int  # 禁止語リストの行番号
     term: str  # 正規化済みの語
+    # 区切りを取り除いた照合に使う語。取り除くと短すぎる語は None（偶然の一致で無関係なものまで止めないため）
+    loose_term: Optional[str] = field(init=False, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        stripped = strip_separators(self.term)
+        min_length = MIN_LOOSE_LENGTH_ASCII if stripped.isascii() else MIN_LOOSE_LENGTH_NON_ASCII
+        object.__setattr__(self, "loose_term", stripped if len(stripped) >= min_length else None)
 
 
 @dataclass(frozen=True)
@@ -65,8 +77,21 @@ class Hit:
 
 
 def normalize(text: str) -> str:
-    """全角・半角と大文字・小文字の違いを吸収する。"""
-    return unicodedata.normalize("NFKC", text).casefold()
+    """全角・半角、大文字・小文字、ひらがなとカタカナの違いを吸収する。"""
+    return _hiragana_to_katakana(unicodedata.normalize("NFKC", text).casefold())
+
+
+def _hiragana_to_katakana(text: str) -> str:
+    return "".join(chr(ord(c) + KANA_OFFSET) if _is_hiragana(c) else c for c in text)
+
+
+def _is_hiragana(char: str) -> bool:
+    return "ぁ" <= char <= "ゖ" or "ゝ" <= char <= "ゞ"
+
+
+def strip_separators(text: str) -> str:
+    """空白・句読点・記号・制御文字・書式文字（ゼロ幅文字を含む）を取り除く。改行も取り除かれる。"""
+    return "".join(c for c in text if unicodedata.category(c)[0] not in "ZPS" and unicodedata.category(c) not in ("Cc", "Cf"))
 
 
 def parse_denylist(text: str) -> list[Rule]:
@@ -124,15 +149,39 @@ def decode(data: bytes) -> str:
 
 def matching_rules(text: str, rules: Iterable[Rule]) -> list[int]:
     normalized = normalize(text)
-    return [rule.number for rule in rules if rule.term in normalized]
-
-
-def scan_text(location: str, text: str, rules: Sequence[Rule]) -> list[Hit]:
+    stripped = strip_separators(normalized)
     return [
-        Hit(location, line_no, number)
-        for line_no, line in enumerate(text.splitlines(), start=1)
-        for number in matching_rules(line, rules)
+        rule.number
+        for rule in rules
+        if rule.term in normalized or (rule.loose_term is not None and rule.loose_term in stripped)
     ]
+
+
+def scan_text(location: str, text: str, rules: Sequence[Rule], loose: bool = True) -> list[Hit]:
+    """一致した行とルールを返す。行をまたぐ一致は、一致の先頭の文字がある行にする。
+
+    loose=False のときは、区切りを取り除く照合をしない。圧縮された画像やフォントのような
+    ほぼ乱数のバイト列では、取り除くと英数字が詰まり、短い語が偶然一致しすぎるため。
+    """
+    found: set[tuple[int, int]] = set()
+    joined: list[str] = []
+    line_of_char: list[int] = []  # 区切りを取り除いた全文の各文字が、元の何行目にあったか
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        normalized = normalize(line)
+        found.update((line_no, rule.number) for rule in rules if rule.term in normalized)
+        stripped = strip_separators(normalized)
+        joined.append(stripped)
+        line_of_char.extend([line_no] * len(stripped))
+
+    whole = "".join(joined)
+    for rule in rules if loose else ():
+        if rule.loose_term is None:
+            continue
+        start = whole.find(rule.loose_term)
+        while start != -1:
+            found.add((line_of_char[start], rule.number))
+            start = whole.find(rule.loose_term, start + 1)
+    return [Hit(location, line_no, number) for line_no, number in sorted(found)]
 
 
 def masked_label(index: int) -> str:
@@ -155,7 +204,7 @@ def inspect_files(files: Sequence[tuple[str, Optional[bytes]]], rules: Sequence[
         if data is None:
             continue
         if PurePosixPath(path).suffix.casefold() in RAW_SCAN_SUFFIXES:
-            problems.extend(scan_text(label, data.decode("utf-8", errors="ignore"), rules))
+            problems.extend(scan_text(label, data.decode("utf-8", errors="ignore"), rules, loose=False))
             continue
         try:
             text = decode(data)

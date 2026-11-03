@@ -14,9 +14,17 @@ from commit_guard import (
     load_denylist,
     normalize,
     parse_denylist,
+    matching_rules,
     private_paths,
     scan_text,
+    strip_separators,
 )
+
+HIRAGANA = "".join(chr(c) for c in [*range(0x3041, 0x3097), 0x309D, 0x309E])
+
+
+def to_katakana(text: str) -> str:
+    return "".join(chr(ord(c) + 0x60) if c in HIRAGANA else c for c in text)
 
 
 class NormalizeTest(unittest.TestCase):
@@ -28,13 +36,117 @@ class NormalizeTest(unittest.TestCase):
 
     def test_2回かけても結果が変わらない(self):
         rng = random.Random(0)
-        alphabet = string.ascii_letters + "ＡＢｃｄ０１ｶﾞｲｼｬ　アイウ漢字ﾟﾞ"
+        alphabet = string.ascii_letters + "ＡＢｃｄ０１ｶﾞｲｼｬ　アイウ漢字ﾟﾞひらがなゔゝ"
         for _ in range(500):
             text = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 20)))
             self.assertEqual(normalize(normalize(text)), normalize(text), repr(text))
 
+    def test_ひらがなをカタカナにそろえる(self):
+        self.assertEqual(normalize("ひらがな"), "ヒラガナ")
+        self.assertEqual(normalize("ぁゔゖゝゞ"), "ァヴヶヽヾ")
+        self.assertEqual(normalize("ー漢字"), "ー漢字")
+
+    def test_ひらがなとカタカナを入れ替えても同じになる(self):
+        rng = random.Random(3)
+        for _ in range(500):
+            hira = "".join(rng.choice(HIRAGANA) for _ in range(rng.randint(0, 12)))
+            mixed = "".join(to_katakana(c) if rng.random() < 0.5 else c for c in hira)
+            self.assertEqual(normalize(mixed), normalize(hira), repr(hira))
+            self.assertEqual(normalize(to_katakana(hira)), normalize(hira), repr(hira))
+
+
+class StripSeparatorsTest(unittest.TestCase):
+    def test_空白・句読点・記号・ゼロ幅文字・制御文字・改行を取り除く(self):
+        self.assertEqual(strip_separators("a b-c・d|e_f\tg​h\ni　j。k\x00l"), "abcdefghijkl")
+
+    def test_文字・数字・長音記号は残す(self):
+        self.assertEqual(strip_separators("ア1ー漢a"), "ア1ー漢a")
+
+
+class MatchingRulesTest(unittest.TestCase):
+    def numbers(self, term, text):
+        return matching_rules(text, parse_denylist(term + "\n"))
+
+    def test_区切りを挿入した書き方でも一致する(self):
+        for text in ["example corp", "example-corp", "ex・ample|corp", "example​corp", "ｅｘａｍｐｌｅ　ｃｏｒｐ"]:
+            with self.subTest(text):
+                self.assertEqual(self.numbers("examplecorp", text), [1])
+
+    def test_区切りをランダムに挿入しても一致する(self):
+        rng = random.Random(4)
+        separators = [" ", "-", "・", "|", "​", "\t", "。", "_", "　", "\n", "⁠"]
+        for term in ["examplecorp", "サンプル会社", "abc", "漢字"]:
+            for _ in range(200):
+                text = "".join(c + "".join(rng.choice(separators) for _ in range(rng.randint(0, 3))) for c in term)
+                self.assertEqual(self.numbers(term, text), [1], repr(text))
+
+    def test_ひらがなの語をカタカナの文で拾う(self):
+        self.assertEqual(self.numbers("さんぷる語", "これはサンプル語です"), [1])
+        self.assertEqual(self.numbers("サンプル語", "これはさんぷる 語です"), [1])
+
+    def test_ASCIIだけの2文字の語は区切りでは一致しない(self):
+        self.assertEqual(self.numbers("ab", "xaby"), [1])
+        self.assertEqual(self.numbers("ab", "a-b"), [])
+        self.assertEqual(self.numbers("ab", "a b"), [])
+
+    def test_ASCIIだけの3文字の語は区切りでも一致する(self):
+        self.assertEqual(self.numbers("abc", "a-b-c"), [1])
+
+    def test_ASCII以外を含む2文字の語は区切りでも一致する(self):
+        self.assertEqual(self.numbers("漢字", "漢 字"), [1])
+        self.assertEqual(self.numbers("ア1", "ア・1"), [1])
+
+    def test_区切りを取り除くと1文字になる語は取り除く照合に使わない(self):
+        self.assertEqual(self.numbers("ア・", "アイウ"), [])
+        self.assertEqual(self.numbers("ア・", "ア・イ"), [1])
+        self.assertEqual(self.numbers("a!", "abc"), [])
+
+    def test_語の長さは区切りを取り除いた後で数え_ASCII判定も取り除いた後の語で行う(self):
+        self.assertEqual(self.numbers("a・b", "xa b"), [])
+        self.assertEqual(self.numbers("a・b", "a・b"), [1])
+
+    def test_記号だけの語は取り除くと空になるため今までの照合だけに使う(self):
+        self.assertEqual(self.numbers("---", "abc def"), [])
+        self.assertEqual(self.numbers("---", "a---b"), [1])
+
+
+class ScanTextTest(unittest.TestCase):
+    def lines(self, term, text):
+        return [(h.line, h.rule) for h in scan_text("f", text, parse_denylist(term + "\n"))]
+
+    def test_行をまたぐ一致は先頭の文字がある行を返す(self):
+        cases = {
+            "foo\nbar": [(1, 1)],
+            "ok\nfoo\n\n\nbar\n": [(2, 1)],
+            "fo\no\nba\nr": [(1, 1)],
+            "x\r\nfoo\r\nbar\r\n": [(2, 1)],
+        }
+        for text, expected in cases.items():
+            with self.subTest(text):
+                self.assertEqual(self.lines("foobar", text), expected)
+
+    def test_行の途中から始まる語が次の行に続く場合も先頭の行を返す(self):
+        self.assertEqual(self.lines("foobar", "xx fo\nobar yy"), [(1, 1)])
+
+    def test_同じ行・同じルールの一致は1件にまとめる(self):
+        self.assertEqual(self.lines("foobar", "foobar foo-bar\n"), [(1, 1)])
+
+    def test_離れた複数の行の一致をそれぞれ返す(self):
+        self.assertEqual(self.lines("foobar", "foo\nbar\nzz\nfoobar\nzz\nfoo bar"), [(1, 1), (4, 1), (6, 1)])
+
+    def test_ASCII以外を含む2文字の語は改行をまたいでも止まりASCIIだけの2文字の語は止まらない(self):
+        self.assertEqual(self.lines("漢字", "ok\n漢\n字\n"), [(2, 1)])
+        self.assertEqual(self.lines("ab", "ok\na\nb\n"), [])
+
+    def test_無関係な文は短い語・記号だけの語があっても止まらない(self):
+        rules = parse_denylist("ゐ\nxy\n--\n。。\n")
+        self.assertEqual(scan_text("f", "Hello, world.\nこれは無関係な文です。\n", rules), [])
+
 
 class ParseDenylistTest(unittest.TestCase):
+    def test_ひらがなで書いた語もカタカナで書いた語も同じルールになる(self):
+        self.assertEqual(parse_denylist("さんぷる語\n"), parse_denylist("サンプル語\n"))
+
     def test_空行とコメント行を無視し元の行番号をルール番号にする(self):
         rules = parse_denylist("# コメント\n\nサンプル語\n  ExampleCorp  \n")
         self.assertEqual([(r.number, r.term) for r in rules], [(3, "サンプル語"), (4, "examplecorp")])
@@ -131,6 +243,14 @@ class InspectFilesTest(unittest.TestCase):
                 problems = inspect_files([(name, b"%PDF-1.7\n\x81\xff\xfe\x80\xa0")], self.rules)
                 self.assertTrue(problems and "検査できません" in problems[0], problems)
 
+    def test_画像とフォントは区切りを取り除く照合をしない(self):
+        rules = parse_denylist("abc\n")
+        data = b"\x89PNG\x00\xffa-b\x00c-\xff\x81"
+        self.assertEqual(inspect_files([("photo.png", data)], rules), [])
+        self.assertEqual(inspect_files([("note.txt", b"a-b\nc\n")], rules), [str(Hit("note.txt", 1, 1))])
+        self.assertEqual(inspect_files([("photo.png", b"a-b\nc\n")], rules), [])
+        self.assertEqual(len(inspect_files([("photo.png", b"\x89PNG\x00abc\x00\x81")], rules)), 1)
+
     def test_サブモジュールはパス名だけを照合する(self):
         self.assertEqual(len(inspect_files([("vendor/ExampleCorp", None)], self.rules)), 1)
         self.assertEqual(inspect_files([("vendor/lib", None)], self.rules), [])
@@ -142,12 +262,25 @@ class InspectFilesTest(unittest.TestCase):
             term = "".join(rng.choice(letters) for _ in range(rng.randint(3, 8)))
             rules = parse_denylist(term + "\n")
             noise = lambda: "".join(rng.choice(letters + " /._") for _ in range(rng.randint(0, 10)))  # noqa: E731
+            split = rng.randint(1, len(term) - 1)
             files = [
                 (noise() + term + noise() + ".md", (noise() + term.upper() + noise() + "\n").encode("utf-8")),
                 (noise() + ".txt", (noise() + term + "\n").encode("utf-16")),
+                (noise() + term[:split] + "-" + term[split:] + ".md", (term[:split] + "\n" + term[split:] + "\n").encode("utf-8")),
+                (noise() + ".txt", (" ".join(term) + "\n").encode("utf-8")),
             ]
             for problem in inspect_files(files, rules):
-                self.assertNotIn(term, normalize(problem))
+                self.assertNotIn(term, strip_separators(normalize(problem)))
+
+    def test_区切りを入れたパス名もパスを伏せる(self):
+        problems = inspect_files([("ok.md", b"ok\n"), ("docs/Example-Corp.md", b"ok\n")], self.rules)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("2 番目", problems[0])
+
+    def test_ひらがなの語がカタカナのファイル内容に一致する(self):
+        hira_rules = parse_denylist("さんぷる語\n")
+        self.assertEqual(inspect_files([("a.md", "ok\nサンプル語\n".encode("utf-8"))], hira_rules), [str(Hit("a.md", 2, 1))])
+        self.assertEqual(inspect_files([("a.md", "ok\nさんぷる語\n".encode("utf-8"))], self.rules), [str(Hit("a.md", 2, 2))])
 
 
 class PrivatePathsTest(unittest.TestCase):
@@ -174,6 +307,10 @@ class DescribeGitleaksFindingsTest(unittest.TestCase):
 
     def test_ファイル名の無い検出はコミットメッセージとして示す(self):
         self.assertTrue(describe_gitleaks_findings(self.findings, self.rules)[2].startswith("コミットメッセージ:2:"))
+
+    def test_区切りを入れたパス名もパスを伏せる(self):
+        findings = [{"RuleID": "github-pat", "File": "docs/Example-Corp.md", "StartLine": 1}]
+        self.assertIn("パス名を伏せた", describe_gitleaks_findings(findings, self.rules)[0])
 
     def test_禁止語リストが読めなければすべてのパスを伏せる(self):
         self.assertNotIn("docs/a.md", describe_gitleaks_findings(self.findings, None)[0])
