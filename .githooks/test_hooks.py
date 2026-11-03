@@ -5,6 +5,7 @@
 """
 
 import base64
+import concurrent.futures
 import os
 import re
 import secrets
@@ -795,6 +796,84 @@ class TrackedModeTest(unittest.TestCase):
         ).stdout.splitlines()
         modes = {line.split("\t")[1]: line.split()[0] for line in listed}
         self.assertEqual(modes, {f".githooks/{h}": "100755" for h in SCRIPTS})
+
+
+class _Recorder(unittest.TestResult):
+    """1 件のテストの結果を、あとで本物の TestResult に流し直すために覚えておく。"""
+
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def _record(self, name, *args):
+        self.events.append((name, args))
+
+    def addSuccess(self, test):
+        self._record("addSuccess", test)
+
+    def addFailure(self, test, err):
+        self._record("addFailure", test, err)
+
+    def addError(self, test, err):
+        self._record("addError", test, err)
+
+    def addSkip(self, test, reason):
+        self._record("addSkip", test, reason)
+
+    def addExpectedFailure(self, test, err):
+        self._record("addExpectedFailure", test, err)
+
+    def addUnexpectedSuccess(self, test):
+        self._record("addUnexpectedSuccess", test)
+
+    def addSubTest(self, test, subtest, err):
+        self._record("addSubTest", test, subtest, err)
+
+    def addDuration(self, test, elapsed):  # Python 3.12 以降。--durations の表示に使う
+        self._record("addDuration", test, elapsed)
+
+
+class _ParallelSuite(unittest.TestSuite):
+    """テストの待ち時間は、起動するフック・git・gitleaks の外部プロセスなので、スレッドで同時に流す。
+
+    TestResult は複数のスレッドから書く前提ではない。1 件ごとに別の結果へ流し、
+    全部終わってから元の順で本物の結果へ書く。
+    テストを 1 件ずつ直接流すので、setUpClass・setUpModule など、クラスやモジュール単位の準備は動かない。
+    """
+
+    def run(self, result, debug=False):
+        tests = list(self)
+        workers = os.cpu_count() or 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            recorders = list(pool.map(self._run_one, tests))
+        for test, recorder in zip(tests, recorders):
+            result.startTest(test)
+            try:
+                for name, args in recorder.events:
+                    getattr(result, name)(*args)
+            finally:
+                result.stopTest(test)
+        return result
+
+    @staticmethod
+    def _run_one(test):
+        recorder = _Recorder()
+        test.run(recorder)
+        return recorder
+
+
+def load_tests(loader, tests, pattern):
+    cases = []
+
+    def flatten(suite):
+        for item in suite:
+            if isinstance(item, unittest.TestSuite):
+                flatten(item)
+            else:
+                cases.append(item)
+
+    flatten(tests)
+    return _ParallelSuite(cases)
 
 
 if __name__ == "__main__":
