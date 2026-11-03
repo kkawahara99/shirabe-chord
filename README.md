@@ -29,7 +29,7 @@
 
 ## コミット前の検査
 
-このリポジトリは公開する前提で扱う（[docs/adr/0004](docs/adr/0004-treat-as-public-from-day-one.md)）。コミットのたびに、`private/` のファイルがステージされていないか、禁止語や秘密情報・個人情報の形が含まれていないかを検査する（[.githooks/](.githooks/)）。clone したら最初に入れる。
+このリポジトリは公開する前提で扱う（[docs/adr/0004](docs/adr/0004-treat-as-public-from-day-one.md)）。コミットのたびに、`private/` のファイルがステージされていないか、禁止語や秘密情報・個人情報の形が含まれていないかを検査する（[.githooks/](.githooks/)）。push の前には、送るコミットすべて（メッセージ・作者とコミッター・パス名と中身・ブランチ名とタグ名）を検査する（[docs/adr/0011](docs/adr/0011-scan-before-push-and-whole-history.md)）。作者とコミッターは、メールが `<ユーザー名>@users.noreply.github.com` で、名前がそのユーザー名であること。clone したら最初に入れる。
 
 1. git 2.31 以上、Python 3.9 以上（検査フックの前提）、[gitleaks](https://github.com/gitleaks/gitleaks) を入れる（Windows なら `winget install Gitleaks.Gitleaks`、macOS なら `brew install gitleaks`、Linux なら [リリース](https://github.com/gitleaks/gitleaks/releases)のバイナリを PATH に置く）。PATH に置けないときは、環境変数 `GITLEAKS` に実行ファイルを指定する。
 2. `git config core.hooksPath .githooks` を実行する。
@@ -37,6 +37,8 @@
 
 検査に引っかかったときは、ファイル名・行番号・ルール番号（禁止語リストの行番号か gitleaks のルールID）だけが出る。一致した語や、禁止語を含むファイル名は出さない（何番目のファイルかだけを出す）。伏せたファイルは本人が確かめる。
 
-防げないもの（cherry-pick と rebase のコミット、1行ごとの部分一致では拾えない書き方、`core.hooksPath` が効かないブランチなど）は [.githooks/README.md](.githooks/README.md) と [ADR 0004](docs/adr/0004-treat-as-public-from-day-one.md) を参照。
+履歴全体を同じ基準で再照合するには `sh .githooks/scan-history` を流す（禁止語を足した後や、公開する前に。違反が無ければ終了コード 0）。
+
+防げないもの（フックを入れていないクローン、GitHub の Web 画面での編集、1行ごとの部分一致では拾えない書き方、`core.hooksPath` が効かないブランチなど）は [.githooks/README.md](.githooks/README.md) と [ADR 0004](docs/adr/0004-treat-as-public-from-day-one.md) を参照。
 
 検査そのもののテストは `python -m unittest discover -s .githooks` で流す。

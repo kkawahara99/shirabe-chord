@@ -14,6 +14,8 @@ keywords = ["@"]
 regexes = [
   '''(?i)@users\.noreply\.github\.com$''',
   '''(?i)^noreply@anthropic\.com$''',
+  # GitHub の Web 画面でマージしたコミットのコミッター
+  '''(?i)^noreply@github\.com$''',
   '''(?i)^git@github\.com$''',
   '''(?i)@example\.(?:com|org|net)$''',
   # 高解像度用の画像の名前（icon@2x.png など）
