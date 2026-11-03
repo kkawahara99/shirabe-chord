@@ -1,0 +1,12 @@
+packages:
+  - packages/*
+  - apps/*
+
+# 公開から 7 日（10080 分）経っていない版を入れない（供給網攻撃への備え。ADR 0015）
+minimumReleaseAge: 10080
+
+# 依存のインストール時スクリプトは、ここに true で書いたものだけ走る。空で始める。
+allowBuilds: {}
+
+# pnpm add で版を ^・~ なしで固定する
+saveExact: true

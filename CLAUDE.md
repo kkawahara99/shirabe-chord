@@ -23,7 +23,7 @@ shirabe-chord — コード進行を入れると、ギターの押さえ方の�
   - 速いテスト（コミット前の検査。毎回）: `python -m unittest discover -s .githooks -p "test_commit_guard.py"`
   - 全体（フックを実際に動かす `.githooks/test_hooks.py` を含み、約 5 分）: `python -m unittest discover -s .githooks`。`test_hooks.py` の `COPIED` に入っているパス（今は `.githooks/`・`.gitleaks.toml`・`.gitignore`）に触れたとき、または gitleaks の実行ファイルを入れ替えたときだけ、コミットの前に流す。
   - 「テストコマンドがすべて通る」は、フックの実行テストだけ条件付き（上の全体）で、ほかのテストコマンド（後から足すものを含む）は毎回流して通ることを指す。
-  - ほかのコマンド（毎回）: `python -m unittest discover -s .claude/hooks`（検査を外すコマンドを止める Claude Code のフック）、`python -m unittest discover -s .claude/skills/aws-architecture-diagram`（構成図のビルド）、Terraform は `terraform -chdir=infra/bootstrap fmt -check -recursive`・`terraform -chdir=infra/bootstrap init -backend=false`・`terraform -chdir=infra/bootstrap validate`・`terraform -chdir=infra/bootstrap test`（AWS の認証情報は不要）。アプリ（TypeScript）のテストコマンドは、実装の Issue で決めて、ここに足す。
+  - ほかのコマンド（毎回）: `python -m unittest discover -s .claude/hooks`（検査を外すコマンドを止める Claude Code のフック）、`python -m unittest discover -s .claude/skills/aws-architecture-diagram`（構成図のビルド）、Terraform は `terraform -chdir=infra/bootstrap fmt -check -recursive`・`terraform -chdir=infra/bootstrap init -backend=false`・`terraform -chdir=infra/bootstrap validate`・`terraform -chdir=infra/bootstrap test`（AWS の認証情報は不要）。アプリ（TypeScript）は `pnpm install --frozen-lockfile`・`pnpm typecheck`・`pnpm test`（依存の決まりは [ADR 0015](docs/adr/0015-pnpm-workspace-and-dependency-guards.md)）。
 - 大量の生入力（巨大な diff・長いログ等）は `bulk-reader` SubAgent に委譲し、要約だけ受け取る。小さい1回限りの読み取りは直接読む。
 
 ## 公開してはいけないもの
