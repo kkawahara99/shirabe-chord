@@ -1,0 +1,6 @@
+# terraform.tfvars にコピーして使う（terraform.tfvars は gitignore 対象）。値は見本。
+# アカウントIDは書かない。デプロイ先から自動で引く。
+
+project_name = "shirabe"
+environment  = "prd"
+region       = "ap-northeast-1"

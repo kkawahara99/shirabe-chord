@@ -1,0 +1,3 @@
+#!/bin/sh
+# 自動で作られるマージコミットにも、pre-commit と同じ検査をかける
+exec "$(dirname "$0")/pre-commit"

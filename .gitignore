@@ -1,0 +1,71 @@
+# OS固有のファイルを無視
+.DS_Store
+Thumbs.db
+
+# IDE/エディタの設定ファイルを無視
+.idea/
+
+# Node.js関連（採用した場合）
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log
+yarn-error.log
+*.log
+
+# Python関連（採用した場合）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.hypothesis/
+
+# TypeScript ビルド情報
+*.tsbuildinfo
+
+# 環境変数・秘密情報
+.env
+.env.*
+
+# 一時的な検証スクリプト・調査ログ・スクラッチ（コミット対象外）
+work/
+.cache/
+
+# Claude Code ローカル設定・個人メモ（git管理外）
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/worktrees/
+
+# Terraform（state・変数・キャッシュは秘匿情報を含むためコミットしない。.terraform.lock.hclはコミット対象）
+.terraform/
+terraform.tfstate.d/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
+# backendの接続先（バケット名等）はアカウント固有情報のため、partial backend configで分離しコミットしない（領域ごとに backend.<領域名>.hcl）
+backend*.hcl
+
+# 禁止語リスト（本人を特定する語など、公開してはいけないもの）の置き場
+private/
+
+# 状態や秘密の値を含みうる plan の出力・ローカル上書き・CLI設定
+*.tfplan
+tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+.terraformrc
+terraform.rc
+
+# トークンが入りうる設定・鍵・エディタ設定
+.mcp.json
+.vscode/
+*.pem
+*.key

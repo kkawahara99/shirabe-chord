@@ -1,0 +1,76 @@
+# gitleaks の既定ルールに、このリポジトリで公開してはいけないもの（CLAUDE.md・docs/adr/0004）を足す。
+# 既定ルールは日本語の個人情報を拾わないため、形で判別できるものだけを独自ルールにする。
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "email-address"
+description = "メールアドレス"
+regex = '''[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'''
+keywords = ["@"]
+
+[[rules.allowlists]]
+regexes = [
+  '''(?i)@users\.noreply\.github\.com$''',
+  '''(?i)^noreply@anthropic\.com$''',
+  '''(?i)^git@github\.com$''',
+  '''(?i)@example\.(?:com|org|net)$''',
+  # 高解像度用の画像の名前（icon@2x.png など）
+  '''(?i)@[0-9]+(?:\.[0-9]+)?x\.(?:png|jpe?g|gif|webp|avif|svg)$''',
+]
+
+[[rules]]
+id = "jp-phone-number"
+description = "日本の電話番号"
+regex = '''(?:^|[^0-9-])(0[0-9]{1,4}-[0-9]{1,4}-[0-9]{4})(?:[^0-9-]|$)'''
+secretGroup = 1
+
+[[rules]]
+id = "jp-postal-code"
+description = "郵便番号（〒付き）"
+regex = '''〒\s*[0-9]{3}-?[0-9]{4}'''
+keywords = ["〒"]
+
+[[rules]]
+id = "aws-arn-with-account"
+description = "アカウントIDを含むARN"
+regex = '''(?i)arn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:([0-9]{12}):'''
+secretGroup = 1
+keywords = ["arn:aws"]
+
+[[rules.allowlists]]
+regexes = ['''^123456789012$''']
+
+[[rules]]
+id = "aws-account-id"
+description = "AWSアカウントID（account_id = / \"Account\": / AWS_ACCOUNT= / OwnerId / アカウントID / 4桁ずつの区切り など）"
+regex = '''(?i)(?:account(?:[_\s-]?id)?|owner[_\s-]?id|アカウント\s*id)["'\s]*[:=：|]?\s*["']?([0-9]{4}-?[0-9]{4}-?[0-9]{4})(?:[^0-9-]|$)'''
+secretGroup = 1
+keywords = ["account", "owner", "アカウント"]
+
+[[rules.allowlists]]
+regexes = ['''^1234-?5678-?9012$''']
+
+[[rules]]
+id = "aws-account-id-in-bucket-name"
+description = "S3 のバケット名（アカウント・リージョン固定の名前空間。末尾が -<アカウントID>-<リージョン>-an）の中のアカウントID（docs/adr/0005）"
+# -an の後ろは固定しない（<バケット名>.s3.<リージョン>.amazonaws.com や s3://<バケット名>/key も拾うため）
+regex = '''(?i)-([0-9]{12})-[a-z]+(?:-[a-z]+)+-[0-9]+-an'''
+secretGroup = 1
+keywords = ["-an"]
+
+[[rules.allowlists]]
+regexes = ['''^123456789012$''']
+
+[[rules]]
+id = "local-home-path"
+description = "ローカルの絶対パス（ユーザー名を含むもの。JSON でエスケープした形・Git Bash・WSL・file:// の形も含む）"
+# 直前の文字を英数字・.・- 以外に限り、URL のホスト名に続く /home/ などを除く。
+# ドライブ名の無い /users/ は API のパス（GET /users/<名前>）と紛れるので、macOS の大文字の /Users/ だけを拾う
+regex = '''(?:^|[^A-Za-z0-9.\-])(?:[A-Za-z]:(?:\\{1,2}|/)(?i:users|home)|/mnt/[a-z]/(?i:users|home)|/[a-z]/(?i:users)|/(?:Users|home))(?:\\{1,2}|/)([^\\/\s"'<>`$%]+)'''
+secretGroup = 1
+keywords = ["users", "home"]
+
+[[rules.allowlists]]
+regexes = ['''(?i)^(?:runner|user|username|you|ubuntu|public|default|shared)$''']

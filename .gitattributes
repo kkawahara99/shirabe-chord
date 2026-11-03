@@ -1,0 +1,2 @@
+# 改行コードは LF に統一する（シェルスクリプトを Linux の CI でも動かすため）
+* text=auto eol=lf

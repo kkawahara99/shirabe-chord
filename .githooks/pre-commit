@@ -1,0 +1,8 @@
+#!/bin/sh
+# ステージされた内容を検査する: private/ のステージ拒否・禁止語の照合・gitleaks（docs/adr/0004）
+. "$(dirname "$0")/_common.sh"
+
+status=0
+"$PYTHON" "$GUARD" staged || status=1
+run_gitleaks git --pre-commit --staged "$ROOT" || status=1
+exit $status

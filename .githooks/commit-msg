@@ -1,0 +1,8 @@
+#!/bin/sh
+# コミットメッセージを検査する: 禁止語の照合・gitleaks（docs/adr/0004）
+. "$(dirname "$0")/_common.sh"
+
+status=0
+"$PYTHON" "$GUARD" message "$1" || status=1
+run_gitleaks stdin < "$1" || status=1
+exit $status

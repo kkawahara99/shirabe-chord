@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "language": "japanese",
+  "permissions": {
+    "allow": [
+      "Bash(ls *)",
+      "Bash(rg *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git worktree *)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git restore*)",
+      "Bash(git stash*)",
+      "Bash(gh label *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list*)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list*)",
+      "Bash(gh repo view *)",
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(npm ci*)",
+      "Read(./**)",
+      "Edit(./**)"
+    ],
+    "ask": [
+      "Bash(terraform destroy*)",
+      "Bash(terraform apply*)",
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(gh issue create*)",
+      "Bash(gh issue edit*)",
+      "Bash(gh issue close*)",
+      "Bash(gh issue reopen*)",
+      "Bash(gh issue comment*)",
+      "Bash(gh issue delete*)",
+      "Bash(npx *)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh repo *)",
+      "Bash(node *)",
+      "Bash(npm install*)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(pip install*)",
+      "Read(../**)",
+      "Bash(ls /*)",
+      "Bash(ls ~*)",
+      "Bash(ls ..*)",
+      "Bash(ls * /*)",
+      "Bash(ls * ~*)",
+      "Bash(ls * ..*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git add -f*)",
+      "Bash(git add --force*)",
+      "Bash(git commit --no-verify*)",
+      "Bash(git commit -n*)",
+      "Edit(./.git/**)",
+      "Bash(git -c *)",
+      "Read(./private/denylist.txt)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(cat ./.env)",
+      "Bash(cat ./.env.*)",
+      "Read(**/.env*)",
+      "Read(**/secrets/**)",
+      "Read(~/Downloads/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.kube/**)",
+      "Read(~/.npmrc)",
+      "Read(~/.terraform.d/credentials.tfrc.json)",
+      "Read(~/AppData/Local/Google/Chrome/**)",
+      "Read(~/AppData/Local/Microsoft/Edge/**)",
+      "Read(~/AppData/Roaming/Mozilla/**)",
+      "Edit(../**)"
+    ]
+  },
+  "autoMemoryEnabled": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-hook-bypass.sh\"",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell|Read|Edit|Write|NotebookEdit|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-sensitive-paths.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/cleanup-merged-worktrees.sh\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
