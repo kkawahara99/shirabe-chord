@@ -76,7 +76,7 @@ Issue はリポジトリを公開すると全部見える。本文を書き直�
 
 `gh issue create --label` に **`model:` を1つ**付ける。
 
-- `model:sonnet` / `model:opus` … 後述の割当指針で選ぶ
+- `model:haiku` / `model:sonnet` / `model:opus` … 後述の割当指針で選ぶ
 
 関連する開発フェーズを束ねる **GitHub Milestone があれば** `--milestone "<タイトル>"` で割り当てる（任意）。マイルストーン単位で進捗・承認ゲートを回したいときに使う。該当 Milestone が無く新設したいなら、タイトルと説明を §0 の 3 の検査にかけてから `gh api repos/:owner/:repo/milestones -f title="<…>" -f description="<…>"` で作り、割り当てる。単発のバグ修正・小機能などは無割り当てでよい。
 
@@ -90,7 +90,16 @@ Issue はリポジトリを公開すると全部見える。本文を書き直�
 - GitHub のリポジトリの設定・Secrets・ブランチ保護の変更、公開・非公開の切り替え
 - 上のどちらかで、別の Issue で作った部品を実際の環境でつないで動かすこと
 
-認証情報を使っても、読むだけの作業（`terraform plan`、`aws ... describe`/`list`/`get`、`gh ... view`/`list`）は含まない。Issue の起票・編集・クローズも含まない。それ以外は、調査と ADR、セキュリティや費用の上限に関わるコード、Terraform のコードを書くことも含めて全部 `model:sonnet` にする。当たるか迷ったら `model:sonnet` にし、effort を `high` にする。
+認証情報を使っても、読むだけの作業（`terraform plan`、`aws ... describe`/`list`/`get`、`gh ... view`/`list`）は含まない。Issue の起票・編集・クローズも含まない。それ以外は、調査と ADR、セキュリティや費用の上限に関わるコード、Terraform のコードを書くことも含めて、次の `model:haiku` の条件を満たすものを除き、全部 `model:sonnet` にする。`model:opus` に当たるか迷ったら `model:sonnet` にし、effort を `high` にする。
+
+**`model:haiku` にするのは、単純作業の Issue だけ**。次の 4 つをすべて満たすときに限り、これで全部とする。
+
+- 既存の文面・設定値・テストの期待値の書き換え、または既存の実装と同じ形の追加で、手順が Issue 本文だけで決まる。
+- 設計の判断が要らない（ADR を起こさない）。
+- 次のどれにも触れない: 上の `model:opus` の条件に当たる作業、検査（`.githooks/`・`.gitleaks.toml`）、`.claude/` のフック・権限設定・エージェント・スキル、`CLAUDE.md`、ログに出すものを決めるコード、訪問者の入力を検証するコード、費用の上限を守るコード、IAM のポリシーや公開範囲を書く Terraform のコード。
+- §4 の必須の項目（`reviewer` への依頼と合格、テスト項目リストの承認）を除いた完了条件が、コマンドの終了コードかファイルの差分で機械的に判定できる。
+
+1 つでも満たさない、または迷うときは `model:sonnet` にし、effort は §8 の基準で決める。Haiku を使える環境の条件は §8 に書く。
 
 ## 4. 遂行フロー（完了条件に必ず織り込む）
 
@@ -172,9 +181,10 @@ claude --model <model> --permission-mode auto --effort <level> "/work-issue #<N>
 
 > `work-issue` は受け渡し（main 直接コミット / worktree+PR）を `CLAUDE.local.md` の運用記載で自動分岐する。起票側でコマンドを使い分ける必要はなく、常に `/work-issue` を載せる。
 
-- `--model`: Issue の `model:` ラベルと一致させる。
+- `--model`: Issue の `model:` ラベルと一致させる。`haiku` を使えるのは、Haiku 5.5 に解決される環境（Anthropic API。Claude Code v2.1.293 以降）だけ。Haiku 4.5 は auto モードに対応せず、Bedrock・Vertex・Foundry では `haiku` が 4.5 に解決される。起票のときに、`claude` を起動する環境が Anthropic API だと本人に確かめ、確かめられなければ `model:sonnet` にする（`CLAUDE_CODE_USE_BEDROCK`・`CLAUDE_CODE_USE_VERTEX`・`CLAUDE_CODE_USE_FOUNDRY`、`CLAUDE_CODE_PROVIDER` の設定は手がかりになるが、起動する側の環境と同じとは限らない）。
 - `--permission-mode auto`: AutoMode で自律遂行させる。
 - `--effort`: `model:` ラベルを基準に、**タスクの難易度に応じて幅を持たせて**当てる。
+  - **haiku** … 既定は `medium`（Haiku 5.5 の既定値）。1 ファイルだけの書き換えのときに限り `low`。Haiku は `medium` までにする（`high` が要るなら単純作業ではないので `model:sonnet` にする）。
   - **sonnet** … 次のどれかを含むなら `high`（これで全部）: ADR を起こす／ログに出すものを決めるコード／訪問者の入力を検証するコード／費用の上限を守るコード／IAM のポリシーや公開範囲を書く Terraform のコード。どれも含まず判断が要るなら `medium`、単純・定型なら `low`。Sonnet は `high` までにする。
   - **opus** … 既定は `high`。複数の Issue の部品を実際の環境で初めてつなぐなら `xhigh`。
 - **依存 Issue がある場合**は、コマンドの下に「依存 #M が close 後に起動」と一言添える。
