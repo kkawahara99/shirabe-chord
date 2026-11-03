@@ -5,7 +5,7 @@
 ## ADR を新規に起こすとき
 
 - 1判断1ファイル `NNNN-内容.md`（ゼロ詰め連番。例 `0001-source-of-truth.md`）。`template.md` を雛形にする。
-- **採番は人間確認が必須**（並列衝突の防止）。連番は worktree／ブランチをまたぐと互いの未マージ ADR が見えず重複しうる。AI は ADR を起こす直前に「次の空き番号はこれで合っているか」を **AutoMode でも止めて `AskUserQuestion` で人間に確認**してから採番する（自律で進めてよい既定の例外）。
+- **採番は、すべての worktree とブランチを見て決める**（人には聞かない）。ADR を起こす直前に `git fetch` し、`git worktree list` の各 worktree の `docs/adr/` と、全ブランチ（ローカル・リモート）の `docs/adr/`（`git ls-tree --name-only <ref> docs/adr/`）を見て、最大の番号に 1 を足す。見ても防げないのは、別のセッションが同時に採番した場合と、push していない他の環境の作業。番号の重複はマージ前のレビューで気づき、後から起こした方を振り直す。
 - **イミュータブル（追記運用）**。一度書いた ADR は書き換えない。状況が変わったら**新しい ADR を起こして supersede**（旧 ADR の `Status` を `Superseded by NNNN` に1行だけ更新するのは可）。
 - 各 ADR は `Status / Date / Context / Decision / Consequences / Why not` を埋める。`Status` は `Proposed`（検討中）/ `Active`（現在有効な決定）/ `Superseded by NNNN`（後継ADRに置き換え済み）の3値で管理する。`Why not`（却下した代替案）は同じ議論の蒸し返しを防ぐ要。
 - ADRはこのプロジェクトの意思決定の**正式な記録**である。手書きの仕様書・設計書は初期構築時の一時的な指標として書いてもよいが正本にはしない（実装が正となり、書けば書くほど陳腐化する前提で扱う。[0001-source-of-truth.md](0001-source-of-truth.md)）。

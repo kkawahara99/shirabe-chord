@@ -2,6 +2,13 @@
 
 コード進行を入れると、ギターの押さえ方の並び（手の移動が少なく弾きやすいもの）を出すサイト。ギターを弾かない作曲者が、ギター担当に渡す譜面を作る助けにする。
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
+  <img src="docs/images/architecture-light.png" alt="構成図。利用者のブラウザは CloudFront から S3 の静的ファイルを取得する（モード 1・2）。モード 3 では、Cognito でログインし、API Gateway と Lambda を通して DynamoDB に掲載とコメントを保存する。人間かどうかの確認は Turnstile に任せる。">
+</picture>
+
+2026-11-03 時点の予定の構成図（アイコンは [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)）。`bootstrap` のバッジはコードがあるもの、ほかは未作成で、実装が進むと食い違う。
+
 次の 3 つのモードを、番号順に作る（[docs/adr/0006](docs/adr/0006-product-scope-and-stages.md)）。
 
 1. 自由にコード進行を入れて、出力を得る（ログイン不要）。
@@ -12,7 +19,7 @@
 
 ## 構成（予定）
 
-静的サイト（S3＋CloudFront）で、コード理論と最適化はブラウザの中で動かす。掲載（モード 3）で認証・API・データ保存を足す。実装は TypeScript（[ADR 0007](docs/adr/0007-typescript-shared-core.md)）、IaC は Terraform（[infra/](infra/README.md)）で、Organizations に依存しない。理由は [docs/adr/](docs/adr/)。
+モード 1・2 は静的サイトで、コード理論と最適化はブラウザの中で動かす。上の図の理由は [docs/adr/](docs/adr/)（実装は TypeScript で [ADR 0007](docs/adr/0007-typescript-shared-core.md)、IaC は Terraform で [infra/](infra/README.md)、Organizations に依存しない [ADR 0003](docs/adr/0003-account-agnostic.md)）。
 
 ## 開発フロー
 

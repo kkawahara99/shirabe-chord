@@ -15,7 +15,7 @@ shirabe-chord — コード進行を入れると、ギターの押さえ方の�
   - **What**（何をすべきか）→ テスト
   - **Why / Why not**（なぜ決めた／採らなかった）→ ADR（[docs/adr/](docs/adr/)。イミュータブル追記・supersede）
 - **手書きの仕様書・設計書を正本にしない**（コード変更で自動更新されず腐る）。
-- 人が全体像を見たいときは構成図等を**コードから都度生成する**（コミットしない。`generate-diagram` / `aws-architecture-diagram` スキル）。
+- 人が全体像を見たいときは構成図等を**コードから都度生成する**（コミットしない。`generate-diagram` / `aws-architecture-diagram` スキル）。例外は README の全体構成図 1 組だけ（[ADR 0009](docs/adr/0009-readme-architecture-diagram-exception.md)）。
 - 暫定スコープ（どの機能から着手するか等）は GitHub Issues のラベル／マイルストーンで管理する。
 - 一時的な検証スクリプト・調査ログ・スクラッチファイルは `work/YYYYMMDD/` に置く（コミット対象外）。
 - **まとまった作業は、コミットする前に `reviewer` SubAgent（`mode: artifact`）を通す**。Issue を経由しない作業も同じで、`Blocker`/`Major` を解消してからコミットする（`commit` スキル）。

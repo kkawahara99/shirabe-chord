@@ -5,7 +5,7 @@ description: コードから依存グラフ等の図を都度生成する。人�
 
 # generate-diagram — 図のオンデマンド生成
 
-正本はコードであり、図は**コードから導出する**（[docs/adr/0001-source-of-truth.md](../../../docs/adr/0001-source-of-truth.md)）。図はファイルとして**コミットしない**——腐るため、見たいときに毎回生成する。出力は `work/`（gitignore）かスクラッチに置き、Mermaid なら本文に出して描画させる。
+正本はコードであり、図は**コードから導出する**（[docs/adr/0001-source-of-truth.md](../../../docs/adr/0001-source-of-truth.md)）。図はファイルとして**コミットしない**（腐るため。例外は README の全体構成図 1 組だけ。[ADR 0009](../../../docs/adr/0009-readme-architecture-diagram-exception.md)）。見たいときに毎回生成する。出力は `work/`（gitignore）かスクラッチに置き、Mermaid なら本文に出して描画させる。
 
 ## 何を出すか（用途で選ぶ）
 
@@ -46,6 +46,6 @@ C4Container
 
 ## 3. 出力の扱い
 
-- **コミットしない**。SVG/PNG は `work/`（gitignore）へ。Mermaid は本文に出して描画させる。
+- **コミットしない**（README の全体構成図 1 組は例外。ADR 0009）。SVG/PNG は `work/`（gitignore）へ。Mermaid は本文に出して描画させる。
 - 図が静的に出しにくい（依存がスパゲッティで読めない等）なら、それは設計が腐っている兆候として報告する（図化スクリプトの問題に矮小化しない）。
 - 生成に使った一時スクリプトは `work/` に置く。
