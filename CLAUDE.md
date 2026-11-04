@@ -27,6 +27,7 @@ shirabe-chord — コード進行を入れると、ギターの押さえ方の�
 - コマンドの書き方（確認で作業を止めないため。何に確認を残すかは [ADR 0012](docs/adr/0012-permission-prompts-and-guard-split.md)）:
   - 複合コマンドは使ってよい。ただし ask のコマンド（`git push`・`npx`・`cp`・`mv`・`node` など）を混ぜない（1つで全体が確認で止まる）。
   - 個別のテストは `packages/core` で `pnpm exec vitest run <ファイル>` を流す。
+  - 使い捨ての TS は `node` で動かさず、Write で `work/YYYYMMDD/` に `*.test.ts` として書き、`packages/core` で `pnpm exec vitest run --root ../../work/YYYYMMDD --silent=false` を流す（`--silent=false` がないと `console.log` が出ない）。
   - 数か所の編集は Edit で行う。プロジェクト内の機械的な一括変更やループは Python のスクリプトでよい。追跡中のファイルの移動は `git mv` を使う。
   - ソースを一時的に書き換えるときは `cp` で退避しない。先にコミットするか元の内容を `work/` に書き出してから、スクリプトで書き換えて finally で戻す（強制終了では finally が走らない）。
 - 大量の生入力（巨大な diff・長いログ等）は `bulk-reader` SubAgent に委譲し、要約だけ受け取る。小さい1回限りの読み取りは直接読む。
