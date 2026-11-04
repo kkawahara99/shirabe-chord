@@ -69,6 +69,42 @@ button[aria-pressed="true"] {
   gap: 1rem;
 }
 
+.shapes {
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+}
+
+.shapes ul {
+  display: flex;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shape-card {
+  flex: none;
+  scroll-snap-align: start;
+  text-align: center;
+}
+
+.shape-card p {
+  margin: 0;
+}
+
+.shape-nav {
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+}
+
+.out-of-window {
+  margin: 0;
+  max-width: 12rem;
+  font-size: 0.875rem;
+  color: #b00020;
+}
+
 .diagram {
   margin: 0;
   text-align: center;

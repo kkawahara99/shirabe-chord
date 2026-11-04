@@ -1,6 +1,8 @@
+import { listShapesByLowestFret, optimizeSymbols } from "@shirabe-chord/core";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { App } from "./app.tsx";
+import { voicingLabel } from "./voicing-diagram.tsx";
 
 const rawSources = import.meta.glob(["./**/*.{ts,tsx}", "!./**/*.test.{ts,tsx}"], {
   query: "?raw",
@@ -8,7 +10,8 @@ const rawSources = import.meta.glob(["./**/*.{ts,tsx}", "!./**/*.test.{ts,tsx}"]
   eager: true,
 }) as Record<string, string>;
 
-const diagrams = () => screen.queryAllByRole("img");
+/** 結果の図（位置ごとの候補の図は含まない）。 */
+const diagrams = () => within(screen.getByRole("region", { name: "進行の押さえ方" })).queryAllByRole("img");
 const diagramLabels = () => diagrams().map((d) => d.getAttribute("aria-label")?.split(":")[0]);
 const alert = () => screen.queryByRole("alert");
 
@@ -19,6 +22,28 @@ const chordButtons = () =>
     .filter((button) => button.hasAttribute("aria-pressed"));
 const chordSymbols = () => chordButtons().map((button) => button.textContent);
 const pressedIndex = () => chordButtons().findIndex((button) => button.getAttribute("aria-pressed") === "true");
+
+const PICKER = "最初のコードの押さえ方の候補";
+const AUTO = "おまかせ（押さえ方を自動で選ぶ）";
+const INITIAL = ["C", "Am", "F", "G7"];
+const autoButton = () => screen.getByRole("button", { name: AUTO });
+const cards = () => within(screen.getByRole("group", { name: PICKER })).getAllByRole("listitem");
+const cardButton = (i: number) => within(cards()[i]!).getByRole("button", { name: "この押さえ方にする" });
+const cardPressed = () => cards().map((_, i) => cardButton(i).getAttribute("aria-pressed"));
+const firstShapes = (symbol: string) => {
+  const shapes = listShapesByLowestFret(symbol);
+  if (!shapes.ok) throw new Error("shapes");
+  return shapes.shapes;
+};
+const expectedLabels = (symbols: string[], shapeIndex?: number) => {
+  const result = optimizeSymbols(
+    symbols,
+    shapeIndex === undefined ? undefined : { firstVoicing: firstShapes(symbols[0]!)[shapeIndex]!.voicing },
+  );
+  if (!result.ok) throw new Error("optimize");
+  return result.steps.map((step) => voicingLabel(step.symbol, step.voicing));
+};
+const resultLabels = () => diagrams().map((d) => d.getAttribute("aria-label"));
 
 const group = (name: string) => screen.getByRole("group", { name });
 const radio = (groupName: string, label: string) =>
@@ -193,6 +218,147 @@ describe("App（画面全体）", () => {
     toggle("#11");
     expect(alert()).toBeNull();
     expect(diagrams()).toHaveLength(4);
+  });
+
+  it("最初のコードの下に、最低フレットごとの図が listShapesByLowestFret と同じ数だけ並び、各カードに「Nフレット付近」と「この押さえ方にする」がある", () => {
+    render(<App />);
+    const shapes = firstShapes("C");
+    expect(cards()).toHaveLength(shapes.length);
+    cards().forEach((card, i) => {
+      expect(within(card).getByText(`${shapes[i]!.lowestFret}フレット付近`)).toBeTruthy();
+      expect(within(card).getAllByRole("img")).toHaveLength(1);
+      expect(cardButton(i)).toBeTruthy();
+    });
+  });
+
+  it("候補の図の並びはラベル付きの領域に入り、「←」「→」ボタンは 1 枚ぶんスクロールするだけで、選択を変えない", () => {
+    render(<App />);
+    const scroller = screen.getByRole("group", { name: PICKER });
+    const scrollBy = vi.fn();
+    scroller.scrollBy = scrollBy;
+    const left = screen.getByRole("button", { name: "前の押さえ方へスクロール" });
+    const right = screen.getByRole("button", { name: "次の押さえ方へスクロール" });
+    expect(left.textContent).toBe("←");
+    expect(right.textContent).toBe("→");
+    fireEvent.click(right);
+    fireEvent.click(left);
+    expect(scrollBy).toHaveBeenCalledTimes(2);
+    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
+    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+  });
+
+  it("最初のコードに押さえ方が無いとき、位置ごとの図の部品（おまかせ・候補）は出ない", () => {
+    render(<App />);
+    pick("種類", "7");
+    toggle("b9");
+    toggle("#9");
+    toggle("#11");
+    expect(within(screen.getByRole("region", { name: "進行の押さえ方" })).getByRole("alert")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
+    expect(screen.queryByRole("button", { name: AUTO })).toBeNull();
+  });
+
+  it("初めは「おまかせ」だけが押された状態で、結果は選択なしの最適化と同じ", () => {
+    render(<App />);
+    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
+    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+    expect(resultLabels()).toEqual(expectedLabels(INITIAL));
+  });
+
+  it("カードの「この押さえ方にする」を押すと、そのボタンだけ押された状態になり、最初の図がその押さえ方になり、続く図が再計算される", () => {
+    render(<App />);
+    const shapes = firstShapes("C");
+    const index = shapes.length - 1; // ネックの付け根寄り
+    fireEvent.click(cardButton(index));
+    expect(autoButton().getAttribute("aria-pressed")).toBe("false");
+    expect(cardPressed()).toEqual(cards().map((_, i) => (i === index ? "true" : "false")));
+    expect(resultLabels()).toEqual(expectedLabels(INITIAL, index));
+    expect(resultLabels()[0]).toBe(voicingLabel("C", shapes[index]!.voicing));
+    expect(resultLabels()).not.toEqual(expectedLabels(INITIAL));
+  });
+
+  it("選んだあとで「おまかせ」を押すと、おまかせだけが押された状態に戻り、結果も選択なしに戻る", () => {
+    render(<App />);
+    fireEvent.click(cardButton(3));
+    fireEvent.click(autoButton());
+    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
+    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+    expect(resultLabels()).toEqual(expectedLabels(INITIAL));
+  });
+
+  it("「おまかせ」の結果がたまたま代表の 1 つと同じでも、そのカードに選択の印は付かない", () => {
+    render(<App />);
+    const auto = resultLabels()[0];
+    const same = firstShapes("C").some((shape) => voicingLabel("C", shape.voicing) === auto);
+    expect(same).toBe(true); // この前提が崩れたら、例を選び直す
+    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+  });
+
+  it("選んだあとで先頭のコードを別のコードに変えると、「おまかせ」に戻る", () => {
+    render(<App />);
+    fireEvent.click(cardButton(3));
+    pick("根音の音名", "D");
+    expect(chordSymbols()[0]).toBe("D");
+    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
+    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+    expect(resultLabels()).toEqual(expectedLabels(["D", "Am", "F", "G7"]));
+  });
+
+  it("選んだあとで先頭のコードを削除して次が繰り上がると、「おまかせ」に戻る", () => {
+    render(<App />);
+    fireEvent.click(cardButton(3));
+    remove(1);
+    expect(chordSymbols()).toEqual(["Am", "F", "G7"]);
+    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
+    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+    expect(resultLabels()).toEqual(expectedLabels(["Am", "F", "G7"]));
+  });
+
+  it("先頭以外のコードを変更・削除しても、選んだ押さえ方は保たれる", () => {
+    render(<App />);
+    fireEvent.click(cardButton(3));
+    select(1);
+    pick("種類", "m7");
+    expect(cardButton(3).getAttribute("aria-pressed")).toBe("true");
+    expect(resultLabels()).toEqual(expectedLabels(["C", "Am7", "F", "G7"], 3));
+    remove(4);
+    expect(cardButton(3).getAttribute("aria-pressed")).toBe("true");
+    expect(resultLabels()).toEqual(expectedLabels(["C", "Am7", "F"], 3));
+  });
+
+  it("手の位置に収まらず範囲を広げたコードの図には「手の位置から外れた押さえ方です」と添える。収まるコードと「おまかせ」では出ない", () => {
+    render(<App />);
+    const outOfWindow = () => screen.queryAllByText("手の位置から外れた押さえ方です");
+    expect(outOfWindow()).toHaveLength(0);
+    select(1);
+    pick("根音の音名", "D");
+    pick("根音の変化記号", "♭");
+    pick("種類", "7");
+    toggle("b9");
+    toggle("#11");
+    expect(chordSymbols()[1]).toBe("Db7(b9,#11)");
+    expect(outOfWindow()).toHaveLength(0); // おまかせ
+    const shapes = firstShapes("C");
+    const index = shapes.findIndex((shape) => shape.lowestFret === 10);
+    expect(index).toBeGreaterThanOrEqual(0);
+    fireEvent.click(cardButton(index));
+    const result = optimizeSymbols(["C", "Db7(b9,#11)", "F", "G7"], { firstVoicing: shapes[index]!.voicing });
+    if (!result.ok) throw new Error("optimize");
+    const expected = result.steps.filter((step) => step.inWindow === false).length;
+    expect(expected).toBeGreaterThan(0);
+    expect(outOfWindow()).toHaveLength(expected);
+    expect(diagrams()[0]!.closest(".step")?.textContent).not.toContain("手の位置から外れた");
+  });
+
+  it("「押さえ方の選び方」の説明が画面にあり、4 つの点（進行全体で選ぶ・同じコードでも同じとは限らない・位置を選ぶと 5 フレットに収める・選べるのは最初のコードだけ）を含む", () => {
+    render(<App />);
+    const text = screen.getByRole("region", { name: "押さえ方の選び方" }).textContent ?? "";
+    expect(text).toContain("進行全体");
+    expect(text).toContain("同じ押さえ方になるとは限りません");
+    expect(text).toContain("5フレット");
+    expect(text).toContain("開放弦とミュート");
+    expect(text).toContain("手の位置から外れた押さえ方です");
+    expect(text).toContain("最初のコードだけ");
   });
 
   it("apps/web のソース（.ts・.tsx）に、HTML をそのまま差し込む React の機能（dangerously で始まるもの）が無い", () => {

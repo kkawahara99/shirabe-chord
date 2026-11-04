@@ -1,6 +1,7 @@
 import {
   buildChordSymbol,
   CHORD_QUALITIES,
+  listShapesByLowestFret,
   MAX_PROGRESSION_CHORDS,
   optimizeSymbols,
   TENSIONS,
@@ -11,9 +12,11 @@ import {
   type NoteLetter,
   type NoteSelection,
   type OptimizeProgressionResult,
+  type Shape,
   type Tension,
 } from "@shirabe-chord/core";
 import { useMemo, useState } from "react";
+import { ShapePicker } from "./shape-picker.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
 const LETTERS: readonly NoteLetter[] = ["C", "D", "E", "F", "G", "A", "B"];
@@ -216,8 +219,16 @@ export function App() {
   const [chords, setChords] = useState<readonly ChordSelection[]>(INITIAL_CHORDS);
   const [selected, setSelected] = useState(0);
 
+  /** 最初のコードで選んだ押さえ方。`null` は「おまかせ」。先頭の記号が変わる・先頭が消えるたびに `null` に戻す。 */
+  const [picked, setPicked] = useState<Shape | null>(null);
+
   const symbols = chords.map(symbolOf);
-  const result = useMemo(() => optimizeSymbols(symbols), [symbols.join(" ")]); // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
+  const joined = symbols.join(" ");
+  const shapes = useMemo(() => listShapesByLowestFret(symbols[0]!), [symbols[0]]); // eslint-disable-line react-hooks/exhaustive-deps -- 先頭の記号が同じなら計算し直さない
+  const result = useMemo(
+    () => optimizeSymbols(symbols, picked ? { firstVoicing: picked.voicing } : undefined),
+    [joined, picked], // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
+  );
 
   const addChord = () => {
     setChords([...chords, NEW_CHORD]);
@@ -225,11 +236,14 @@ export function App() {
   };
   const removeChord = (index: number) => {
     setChords(chords.filter((_, i) => i !== index));
+    if (index === 0) setPicked(null);
     if (index < selected) setSelected(selected - 1);
     else if (index === selected) setSelected(Math.max(0, index - 1));
   };
-  const changeSelected = (selection: ChordSelection) =>
+  const changeSelected = (selection: ChordSelection) => {
+    if (selected === 0 && symbolOf(selection) !== symbols[0]) setPicked(null);
     setChords(chords.map((chord, i) => (i === selected ? selection : chord)));
+  };
 
   return (
     <main>
@@ -261,21 +275,45 @@ export function App() {
         <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
         <ChordEditor selection={chords[selected]!} onChange={changeSelected} />
       </section>
-      {result.ok ? (
-        <div className="diagrams">
-          {result.steps.map((step, i) => (
-            <VoicingDiagram key={i} symbol={step.symbol} voicing={step.voicing} />
-          ))}
-        </div>
-      ) : (
-        <div role="alert" className="failures">
-          <ul>
-            {failureMessages(result).map((message, i) => (
-              <li key={i}>{message}</li>
-            ))}
-          </ul>
-        </div>
+      {shapes.ok && (
+        <ShapePicker
+          symbol={symbols[0]!}
+          shapes={shapes.shapes}
+          pickedIndex={picked?.candidateIndex ?? null}
+          onPick={setPicked}
+        />
       )}
+      <section aria-label="進行の押さえ方">
+        {result.ok ? (
+          <div className="diagrams">
+            {result.steps.map((step, i) => (
+              <div key={i} className="step">
+                <VoicingDiagram symbol={step.symbol} voicing={step.voicing} />
+                {step.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div role="alert" className="failures">
+            <ul>
+              {failureMessages(result).map((message, i) => (
+                <li key={i}>{message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+      <section aria-labelledby="how-title">
+        <h2 id="how-title">押さえ方の選び方</h2>
+        <ul>
+          <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
+          <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
+          <li>
+            手の位置を選ぶと、最初のコードの最低フレットから5フレット分に収まる押さえ方から選びます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
+          </li>
+          <li>位置を選べるのは最初のコードだけです。</li>
+        </ul>
+      </section>
     </main>
   );
 }
