@@ -99,6 +99,15 @@ export function voicingFeatures(voicing: Voicing): VoicingFeatures {
   };
 }
 
+/**
+ * 押さえるフレット（開放とミュートを除く）の最小値。押さえるフレットが無ければ undefined。
+ * 平均フレット（`voicingFeatures` の `averageFret`）とは別のもの。
+ */
+export function lowestPressedFret(voicing: Voicing): number | undefined {
+  const pressed = voicing.filter((fret): fret is number => fret !== null && fret > 0);
+  return pressed.length === 0 ? undefined : Math.min(...pressed);
+}
+
 const fail = (reason: VoicingFailure): ValidateVoicingResult => ({ ok: false, reason });
 
 /** 押さえ方がコードの押さえ方として妥当かを判定する。どんな値が渡されても例外を投げない。 */

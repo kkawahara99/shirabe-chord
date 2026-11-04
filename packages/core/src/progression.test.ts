@@ -1,8 +1,8 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { MAX_PROGRESSION_CHORDS, optimizeProgression, optimizeSymbols, splitProgression } from "./progression.ts";
-import { chord, chordSymbols, show } from "./test-helpers.ts";
-import { generateVoicings, validateVoicing } from "./voicing.ts";
+import { MAX_PROGRESSION_CHORDS, MAX_PROGRESSION_LENGTH, optimizeProgression, optimizeSymbols, splitProgression } from "./progression.ts";
+import { chord, chordSymbols, lowestFretOf, pressedFretsOf, show, v } from "./test-helpers.ts";
+import { generateVoicings, validateVoicing, type Voicing } from "./voicing.ts";
 
 /** 成功を期待して、選ばれた押さえ方を "x32010" の形で返す。 */
 function picked(text: string): string[] {
@@ -240,5 +240,162 @@ describe("optimizeSymbols: 記号の配列から選ぶ", () => {
       }),
       { numRuns: 50 },
     );
+  });
+});
+
+/** コード `symbol` の押さえ方のうち、最低フレットが `lowest` のもの。 */
+function shapesWithLowestFret(symbol: string, lowest: number): Voicing[] {
+  return generateVoicings(chord(symbol)).filter((voicing) => lowestFretOf(voicing) === lowest);
+}
+
+/** 成功を期待して返す。 */
+function succeeded(result: ReturnType<typeof optimizeSymbols>) {
+  if (!result.ok) throw new Error(`失敗: ${JSON.stringify(result)}`);
+  return result;
+}
+
+/** 押さえるフレットがすべて [low, high] に収まる（開放弦とミュートは問わない）。 */
+const fitsWindow = (voicing: Voicing, low: number, high: number) =>
+  pressedFretsOf(voicing).every((fret) => fret >= low && fret <= high);
+
+describe("optimizeSymbols: 最初の押さえ方の指定（firstVoicing）", () => {
+  const barreAt8 = v("8 10 10 9 8 8"); // C の 8 フレットのセーハ形
+
+  it("指定した押さえ方が、先頭の押さえ方になる", () => {
+    expect(validateVoicing(barreAt8, chord("C"))).toEqual({ ok: true });
+    const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: barreAt8 }));
+    expect(result.steps[0]!.voicing).toEqual(barreAt8);
+    expect(result.steps).toHaveLength(4);
+  });
+
+  it("最低フレット 5 の C を指定すると、続くコードは開放に戻らず 5〜9 フレットの窓に収まる", () => {
+    const first = shapesWithLowestFret("C", 5)[0]!;
+    const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: first }));
+    expect(result.steps.map((step) => step.inWindow)).toEqual([true, true, true, true]);
+    for (const step of result.steps.slice(1)) expect(fitsWindow(step.voicing, 5, 9)).toBe(true);
+    expect(show(result.steps[1]!.voicing)).not.toBe("x02210"); // 指定なしのときの Am（開放寄り）
+  });
+
+  it("inWindow が true のコードは、押さえるフレットがすべて窓に収まり、false のコードは窓に収まる候補が元々無い（性質）", () => {
+    fc.assert(
+      fc.property(
+        fc.array(chordSymbols, { minLength: 1, maxLength: 6 }),
+        fc.nat(),
+        (list, pick) => {
+          const firstCandidates = generateVoicings(chord(list[0]!));
+          const first = firstCandidates[pick % firstCandidates.length]!;
+          const result = succeeded(optimizeSymbols(list, { firstVoicing: first }));
+          expect(result.steps[0]!.voicing).toEqual(first);
+          const lowest = lowestFretOf(first);
+          result.steps.forEach((step, i) => {
+            if (lowest === undefined) return expect(step.inWindow).toBe(true);
+            const anyFits = generateVoicings(chord(list[i]!)).some((c) => fitsWindow(c, lowest, lowest + 4));
+            if (step.inWindow) expect(fitsWindow(step.voicing, lowest, lowest + 4)).toBe(true);
+            else expect(anyFits).toBe(false);
+            if (i === 0) expect(step.inWindow).toBe(true);
+          });
+        },
+      ),
+      { numRuns: 40 },
+    );
+  });
+
+  it("窓に収まる候補が無いコードは窓を広げて選び、inWindow:false が付く", () => {
+    // C7(9,13) は 9〜13 フレットの窓に押さえ方が無い。最低フレット 10 の C を指定すると窓は 10〜14。
+    const first = shapesWithLowestFret("C", 10)[0]!;
+    expect(generateVoicings(chord("C7(9,13)")).some((c) => fitsWindow(c, 10, 14))).toBe(false);
+    const result = succeeded(optimizeSymbols(["C", "C7(9,13)"], { firstVoicing: first }));
+    expect(result.steps.map((step) => step.inWindow)).toEqual([true, false]);
+    expect(validateVoicing(result.steps[1]!.voicing, chord("C7(9,13)"))).toEqual({ ok: true });
+    // 窓は 1 つずつ広がるので、いちばん近い押さえ方が選ばれる。
+    expect(lowestFretOf(result.steps[1]!.voicing)).toBe(8);
+  });
+
+  it("窓を広げても、続くコードは広げずに収まるなら inWindow:true のまま", () => {
+    const first = shapesWithLowestFret("C", 10)[0]!;
+    const result = succeeded(optimizeSymbols(["C", "C7(9,13)", "C"], { firstVoicing: first }));
+    expect(result.steps.map((step) => step.inWindow)).toEqual([true, false, true]);
+  });
+
+  it("開放弦とミュートだけの押さえ方を指定すると、窓をかけずに先頭だけ固定し、inWindow は全て true", () => {
+    const openOnly = v("0x0000"); // Em7
+    expect(validateVoicing(openOnly, chord("Em7"))).toEqual({ ok: true });
+    const result = succeeded(optimizeSymbols(["Em7", "C", "Am", "F"], { firstVoicing: openOnly }));
+    expect(result.steps[0]!.voicing).toEqual(openOnly);
+    expect(result.steps.map((step) => step.inWindow)).toEqual([true, true, true, true]);
+    // 窓があれば除かれてしまう、開放寄りの C が選ばれる。
+    expect(show(result.steps[1]!.voicing)).toBe("x32010");
+  });
+
+  it.each<[string, unknown]>([
+    ["別のコードの押さえ方", v("x02210")], // Am の押さえ方を C に
+    ["弦の数が違う", [3, 2, 0, 1, 0]],
+    ["フレットが負", [-1, 3, 2, 0, 1, 0]],
+    ["フレットが整数でない", [null, 3, 2, 0, 1, 0.5]],
+    ["フレットが NaN", [null, 3, 2, 0, 1, Number.NaN]],
+    ["配列でない", "x32010"],
+    ["null", null],
+  ])("妥当でない firstVoicing（%s）は invalid-first-voicing", (_name, firstVoicing) => {
+    expect(optimizeSymbols(["C", "Am"], { firstVoicing: firstVoicing as Voicing })).toEqual({
+      ok: false,
+      reason: "invalid-first-voicing",
+    });
+  });
+
+  it("既存の失敗を先に判定する。firstVoicing が不正でも、空・多すぎ・読めない記号はその失敗を返す", () => {
+    const bad = v("x02210") as Voicing;
+    expect(optimizeSymbols([], { firstVoicing: bad })).toEqual({ ok: false, reason: "empty" });
+    expect(optimizeSymbols(Array(MAX_PROGRESSION_CHORDS + 1).fill("C"), { firstVoicing: bad })).toEqual({
+      ok: false,
+      reason: "too-many-chords",
+    });
+    expect(optimizeSymbols(["C", "H"], { firstVoicing: bad })).toEqual({
+      ok: false,
+      reason: "invalid-chords",
+      chords: [{ index: 1, symbol: "H", reason: "invalid-root" }],
+    });
+    expect(optimizeProgression("C".repeat(MAX_PROGRESSION_LENGTH + 1), { firstVoicing: bad })).toEqual({
+      ok: false,
+      reason: "too-long",
+    });
+  });
+
+  it("candidateIndex は、窓で絞ったあとも generateVoicings の結果全体の中の位置（性質）", () => {
+    fc.assert(
+      fc.property(fc.array(chordSymbols, { minLength: 1, maxLength: 6 }), fc.nat(), (list, pick) => {
+        const firstCandidates = generateVoicings(chord(list[0]!));
+        const first = firstCandidates[pick % firstCandidates.length]!;
+        const result = succeeded(optimizeSymbols(list, { firstVoicing: first }));
+        result.steps.forEach((step) => {
+          expect(step.voicing).toEqual(generateVoicings(chord(step.symbol))[step.candidateIndex]);
+        });
+      }),
+      { numRuns: 30 },
+    );
+  });
+
+  it("optimizeProgression でも同じ指定ができ、optimizeSymbols と同じ結果になる", () => {
+    const options = { firstVoicing: barreAt8 };
+    expect(optimizeProgression("C Am | F G", options)).toEqual(
+      optimizeSymbols(splitProgression("C Am | F G"), options),
+    );
+  });
+
+  it("同じ入力は毎回同じ結果（firstVoicing あり。性質）", () => {
+    fc.assert(
+      fc.property(fc.array(chordSymbols, { minLength: 1, maxLength: 5 }), fc.nat(), (list, pick) => {
+        const firstCandidates = generateVoicings(chord(list[0]!));
+        const options = { firstVoicing: firstCandidates[pick % firstCandidates.length]! };
+        expect(optimizeSymbols(list, options)).toEqual(optimizeSymbols(list, options));
+      }),
+      { numRuns: 20 },
+    );
+  });
+
+  it("options が無い、または firstVoicing が無いときは、結果は変わらず inWindow も付かない", () => {
+    const plain = succeeded(optimizeSymbols(["C", "Am", "F", "G"]));
+    expect(plain.steps.map((step) => show(step.voicing))).toEqual(["x32010", "x02210", "133211", "320003"]);
+    for (const step of plain.steps) expect("inWindow" in step).toBe(false);
+    expect(optimizeSymbols(["C", "Am", "F", "G"], {})).toEqual(plain);
   });
 });
