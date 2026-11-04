@@ -1,0 +1,52 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+
+main {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+label {
+  display: block;
+  font-weight: bold;
+}
+
+textarea {
+  width: 100%;
+  font: inherit;
+}
+
+.hint {
+  margin: 0.25rem 0 1rem;
+  font-size: 0.875rem;
+}
+
+.diagrams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.diagram {
+  margin: 0;
+  text-align: center;
+}
+
+.diagram figcaption {
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.failures {
+  padding-left: 1.25rem;
+  color: #b00020;
+  overflow-wrap: anywhere;
+}

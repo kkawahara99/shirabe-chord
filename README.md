@@ -15,7 +15,16 @@
 2. 出力を、各コードの押さえ方の候補から選び直して微調整する。
 3. 出力を恒久的に掲載し、コメントを残せる（書き込みはログイン必須）。
 
-状態: 設計の段階。アプリのコードはまだない（`infra/bootstrap` の Terraform のみ）。
+状態: モード 1 が手元で動く（配信はまだ。AWS のコードは `infra/bootstrap` の Terraform のみ）。
+
+手元で動かす（Node.js 24 系と pnpm が要る。版は `package.json` の `packageManager`）:
+
+```
+pnpm install
+pnpm --filter web dev
+```
+
+表示された URL（通常は http://localhost:5173/ ）をブラウザで開く。静的ファイルにするには `pnpm --filter web build`（`apps/web/dist` にできる）。画面は [docs/adr/0019](docs/adr/0019-web-screen-with-vite-and-react.md)。
 
 ## 構成（予定）
 
