@@ -24,6 +24,11 @@ shirabe-chord — コード進行を入れると、ギターの押さえ方の�
   - 全体（フックを実際に動かす `.githooks/test_hooks.py` を含み、約 5 分）: `python -m unittest discover -s .githooks`。`test_hooks.py` の `COPIED` に入っているパス（今は `.githooks/`・`.gitleaks.toml`・`.gitignore`）に触れたとき、または gitleaks の実行ファイルを入れ替えたときだけ、コミットの前に流す。
   - 「テストコマンドがすべて通る」は、フックの実行テストだけ条件付き（上の全体）で、ほかのテストコマンド（後から足すものを含む）は毎回流して通ることを指す。
   - ほかのコマンド（毎回）: `python -m unittest discover -s .claude/hooks`（検査を外すコマンドを止める Claude Code のフック）、`python -m unittest discover -s .claude/skills/aws-architecture-diagram`（構成図のビルド）、Terraform は `terraform -chdir=infra/bootstrap fmt -check -recursive`・`terraform -chdir=infra/bootstrap init -backend=false`・`terraform -chdir=infra/bootstrap validate`・`terraform -chdir=infra/bootstrap test`（AWS の認証情報は不要）。アプリ（TypeScript）は `pnpm install --frozen-lockfile`・`pnpm typecheck`・`pnpm test`（依存の決まりは [ADR 0015](docs/adr/0015-pnpm-workspace-and-dependency-guards.md)）。
+- コマンドの書き方（確認で作業を止めないため。何に確認を残すかは [ADR 0012](docs/adr/0012-permission-prompts-and-guard-split.md)）:
+  - 複合コマンドは使ってよい。ただし ask のコマンド（`git push`・`npx`・`cp`・`mv`・`node` など）を混ぜない（1つで全体が確認で止まる）。
+  - 個別のテストは `packages/core` で `pnpm exec vitest run <ファイル>` を流す。
+  - 数か所の編集は Edit で行う。プロジェクト内の機械的な一括変更やループは Python のスクリプトでよい。追跡中のファイルの移動は `git mv` を使う。
+  - ソースを一時的に書き換えるときは `cp` で退避しない。先にコミットするか元の内容を `work/` に書き出してから、スクリプトで書き換えて finally で戻す（強制終了では finally が走らない）。
 - 大量の生入力（巨大な diff・長いログ等）は `bulk-reader` SubAgent に委譲し、要約だけ受け取る。小さい1回限りの読み取りは直接読む。
 
 ## 公開してはいけないもの
