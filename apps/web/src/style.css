@@ -14,18 +14,52 @@ main {
   padding: 1rem;
 }
 
-label {
-  display: block;
-  font-weight: bold;
+.chords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
 }
 
-textarea {
-  width: 100%;
+.chord-item {
+  display: flex;
+}
+
+/* 操作の部品は 24x24 CSS ピクセル以上にする（WCAG 2.2）。 */
+button,
+.choice {
+  min-width: 2rem;
+  min-height: 2rem;
   font: inherit;
 }
 
-.hint {
-  margin: 0.25rem 0 1rem;
+button[aria-pressed="true"] {
+  font-weight: bold;
+  outline: 2px solid currentColor;
+}
+
+.choices {
+  margin: 0.5rem 0;
+  border: 1px solid #888;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+}
+
+.quality-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.quality-group-title {
+  min-width: 6rem;
   font-size: 0.875rem;
 }
 

@@ -47,7 +47,14 @@ export function splitProgression(text: string): string[] {
  */
 export function optimizeProgression(text: string): OptimizeProgressionResult {
   if (text.length > MAX_PROGRESSION_LENGTH) return { ok: false, reason: "too-long" };
-  const symbols = splitProgression(text);
+  return optimizeSymbols(splitProgression(text));
+}
+
+/**
+ * コード記号の配列から、押さえ方の並びを選ぶ。記号は分割・正規化せずそのまま読む。
+ * 文字数は検査しない（記号をつなぐと `MAX_PROGRESSION_LENGTH` を超えうる。文字数の上限は文字列で渡す入口だけ）。
+ */
+export function optimizeSymbols(symbols: readonly string[]): OptimizeProgressionResult {
   if (symbols.length === 0) return { ok: false, reason: "empty" };
   if (symbols.length > MAX_PROGRESSION_CHORDS) return { ok: false, reason: "too-many-chords" };
 
