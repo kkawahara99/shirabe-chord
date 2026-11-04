@@ -30,6 +30,9 @@ export {
 } from "./progression.ts";
 export type {
   InvalidChord,
+  OptimizeOptions,
   OptimizeProgressionResult,
   ProgressionStep,
 } from "./progression.ts";
+export { listShapesByLowestFret } from "./shapes.ts";
+export type { ListShapesResult, Shape } from "./shapes.ts";

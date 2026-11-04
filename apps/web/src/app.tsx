@@ -68,6 +68,8 @@ function failureMessages(result: Extract<OptimizeProgressionResult, { ok: false 
     case "too-long":
     case "too-many-chords":
       return [`コードが多すぎます（${MAX_PROGRESSION_CHORDS}個まで）`];
+    case "invalid-first-voicing":
+      return ["最初のコードの押さえ方が合っていません"];
     case "invalid-chords":
       return result.chords.map(describeInvalidChord);
   }

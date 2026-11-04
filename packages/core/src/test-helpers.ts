@@ -14,6 +14,17 @@ export function show(voicing: Voicing): string {
   return tokens.some((token) => String(token).length > 1) ? tokens.join(" ") : tokens.join("");
 }
 
+/** 押さえるフレット（開放とミュートを除く）。テストが期待値を実装と別に求めるために使う。 */
+export function pressedFretsOf(voicing: Voicing): number[] {
+  return voicing.filter((fret): fret is number => fret !== null && fret > 0);
+}
+
+/** 最低フレット。押さえるフレットが無いときは undefined。 */
+export function lowestFretOf(voicing: Voicing): number | undefined {
+  const pressed = pressedFretsOf(voicing);
+  return pressed.length === 0 ? undefined : Math.min(...pressed);
+}
+
 export function chord(symbol: string): ParsedChord {
   const result = parseChord(symbol);
   if (!result.ok) throw new Error(`${symbol} が読めない: ${result.reason}`);
