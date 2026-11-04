@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { parseChord, type ParsedChord } from "./chord.ts";
+import type { ParsedChord } from "./chord.ts";
+import { chord, v } from "./test-helpers.ts";
 import {
   generateVoicings,
   validateVoicing,
@@ -8,18 +9,6 @@ import {
   type Voicing,
   type VoicingFailure,
 } from "./voicing.ts";
-
-/** "x32010"（1 文字 1 弦）か "10 0 12 10 10 x"（空白区切り）を、6弦から1弦の順の押さえ方にする。 */
-function v(text: string): Voicing {
-  const tokens = text.includes(" ") ? text.split(" ") : [...text];
-  return tokens.map((token) => (token === "x" ? null : Number(token)));
-}
-
-function chord(symbol: string): ParsedChord {
-  const result = parseChord(symbol);
-  if (!result.ok) throw new Error(`${symbol} が読めない: ${result.reason}`);
-  return result;
-}
 
 /** 妥当なら "ok"、そうでなければ理由の種類。 */
 function verdict(voicing: unknown, symbol: string): VoicingFailure | "ok" {
