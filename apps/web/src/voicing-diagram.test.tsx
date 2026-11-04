@@ -10,6 +10,9 @@ const BM: Voicing = [null, 2, 4, 4, 3, 2];
 const marks = (container: HTMLElement, mark: string) =>
   Array.from(container.querySelectorAll<SVGElement>(`[data-mark="${mark}"]`));
 
+const num = (el: Element, attr: string) => Number(el.getAttribute(attr));
+const fretNumbers = (container: HTMLElement) => marks(container, "fret-number").map((m) => m.textContent);
+
 describe("startFretOf（開始フレット）", () => {
   it("押さえる最大のフレットが 5 以下なら 1", () => {
     expect(startFretOf(C)).toBe(1);
@@ -42,45 +45,111 @@ describe("VoicingDiagram（押さえ方の図）", () => {
     expect(marks(container, "dot")).toHaveLength(3);
   });
 
-  it("押さえる点が弦とフレットの正しい位置に出る（6弦が左、点は開始フレットからの相対位置）", () => {
+  it("押さえる点が弦とフレットの正しい位置に出る（1弦が上、フレットが大きいほど右、点は開始フレットからの相対位置）", () => {
     const { container } = render(<VoicingDiagram symbol="C" voicing={C} />);
     const dots = marks(container, "dot");
-    expect(dots.map((d) => [d.dataset.string, d.dataset.row])).toEqual([
+    expect(dots.map((d) => [d.dataset.string, d.dataset.cell])).toEqual([
       ["5", "3"],
       ["4", "2"],
       ["2", "1"],
     ]);
-    const x = (mark: SVGElement) => Number(mark.getAttribute("cx"));
-    expect(x(dots[0]!)).toBeLessThan(x(dots[1]!)); // 5弦のほうが左
+    const [d5, d4, d2] = dots;
+    expect(num(d2!, "cy")).toBeLessThan(num(d4!, "cy")); // 2弦のほうが上
+    expect(num(d4!, "cy")).toBeLessThan(num(d5!, "cy"));
+    expect(num(d2!, "cx")).toBeLessThan(num(d4!, "cx")); // 1フレットのほうが左
+    expect(num(d4!, "cx")).toBeLessThan(num(d5!, "cx"));
     expect(marks(container, "mute")[0]!.dataset.string).toBe("6");
   });
 
-  it("セーハは横棒 1 本で描く（F は 1 フレットに 6弦〜1弦、Bm は 2 フレットに 5弦〜1弦）", () => {
+  it("セーハは縦長の棒 1 本で描く（F は 1 フレットに 6弦〜1弦、Bm は 2 フレットに 5弦〜1弦）", () => {
     const f = render(<VoicingDiagram symbol="F" voicing={F} />);
     const fBars = marks(f.container, "barre");
     expect(fBars).toHaveLength(1);
-    expect(fBars[0]!.dataset).toMatchObject({ row: "1", fromString: "6", toString: "1" });
+    expect(fBars[0]!.dataset).toMatchObject({ cell: "1", fromString: "6", toString: "1" });
+    expect(num(fBars[0]!, "height")).toBeGreaterThan(num(fBars[0]!, "width"));
     f.unmount();
 
     const bm = render(<VoicingDiagram symbol="Bm" voicing={BM} />);
     const bmBars = marks(bm.container, "barre");
     expect(bmBars).toHaveLength(1);
-    expect(bmBars[0]!.dataset).toMatchObject({ row: "2", fromString: "5", toString: "1" });
+    expect(bmBars[0]!.dataset).toMatchObject({ cell: "2", fromString: "5", toString: "1" });
   });
 
-  it("セーハが無い押さえ方は横棒を描かない", () => {
+  it("セーハが無い押さえ方は棒を描かない", () => {
     const { container } = render(<VoicingDiagram symbol="C" voicing={C} />);
     expect(marks(container, "barre")).toHaveLength(0);
   });
 
-  it("開始フレットが 1 でないときだけ、開始フレットの番号を出す", () => {
-    const high = render(<VoicingDiagram symbol="Bb" voicing={[null, 6, 8, 8, 8, 6]} />);
-    expect(screen.getByText("6fr")).toBeTruthy();
-    expect(marks(high.container, "dot").map((d) => d.dataset.row)).toEqual(["1", "3", "3", "3", "1"]);
-    high.unmount();
+  it("ナット（開始フレットが 1 のときの太線）が左端にあり、×と○はナットより左に置く", () => {
+    const { container } = render(<VoicingDiagram symbol="C" voicing={C} />);
+    const nut = marks(container, "nut");
+    expect(nut).toHaveLength(1);
+    const nutX = num(nut[0]!, "x1");
+    for (const dot of marks(container, "dot")) expect(num(dot, "cx")).toBeGreaterThan(nutX);
+    for (const open of marks(container, "open")) expect(num(open, "cx")).toBeLessThan(nutX);
+    const mute = marks(container, "mute")[0]!;
+    expect(Number(mute.dataset.x)).toBeLessThan(nutX);
+  });
 
-    render(<VoicingDiagram symbol="F" voicing={F} />);
+  it("開始フレットが 1 でない図にはナットを描かない", () => {
+    const { container } = render(<VoicingDiagram symbol="Bb" voicing={[null, 6, 8, 8, 8, 6]} />);
+    expect(marks(container, "nut")).toHaveLength(0);
+  });
+
+  it("全フレットの枠に番号を出す（開始フレット 1 は 1〜5、8 は 8〜12）。Nfr 表記は出さない", () => {
+    const low = render(<VoicingDiagram symbol="C" voicing={C} />);
+    expect(fretNumbers(low.container)).toEqual(["1", "2", "3", "4", "5"]);
+    low.unmount();
+
+    const high = render(<VoicingDiagram symbol="X" voicing={[null, 8, 10, 10, 10, 8]} />);
+    expect(fretNumbers(high.container)).toEqual(["8", "9", "10", "11", "12"]);
     expect(screen.queryByText(/fr$/)).toBeNull();
+    // 番号は図の下（弦より下）に出る。
+    const stringBottom = Math.max(...Array.from(high.container.querySelectorAll("line")).map((l) => num(l, "y2")));
+    for (const label of marks(high.container, "fret-number")) expect(num(label, "y")).toBeGreaterThan(stringBottom);
+  });
+
+  it("ポジションマーク（開始 1・C）は 3・5 フレットに 1 つずつ、枠の中央（3弦と4弦の間）に出る", () => {
+    const { container } = render(<VoicingDiagram symbol="C" voicing={C} />);
+    const inlays = marks(container, "inlay");
+    expect(inlays.map((m) => m.dataset.fret)).toEqual(["3", "5"]);
+    for (const m of inlays) expect(m.getAttribute("aria-hidden")).toBe("true");
+    expect(new Set(inlays.map((m) => num(m, "cy"))).size).toBe(1);
+    expect(inlays.map((m) => m.dataset.betweenStrings)).toEqual(["3-4", "3-4"]);
+  });
+
+  it("ポジションマーク（開始 8）は 9 に 1 つ、12 に 2 つ（2弦と3弦の間・4弦と5弦の間）。8・10・11 には出ない", () => {
+    const { container } = render(<VoicingDiagram symbol="X" voicing={[null, 8, 10, 10, 10, 8]} />);
+    const inlays = marks(container, "inlay");
+    expect(inlays.map((m) => [m.dataset.fret, m.dataset.betweenStrings])).toEqual([
+      ["9", "3-4"],
+      ["12", "2-3"],
+      ["12", "4-5"],
+    ]);
+  });
+
+  it("ポジションマークは押さえる丸やセーハより先に描く（その下になる）", () => {
+    const { container } = render(<VoicingDiagram symbol="F" voicing={[1, 3, 3, 2, 1, 1]} />);
+    const all = Array.from(container.querySelectorAll("[data-mark]"));
+    const lastInlay = Math.max(...marks(container, "inlay").map((m) => all.indexOf(m)));
+    const firstPress = Math.min(...[...marks(container, "dot"), ...marks(container, "barre")].map((m) => all.indexOf(m)));
+    expect(lastInlay).toBeLessThan(firstPress);
+  });
+
+  it("開始フレット 1〜15 のどの図でも、ポジションマークは 3・5・7・9・15・17・19 が 1 つ、12 が 2 つ、ほかは無し", () => {
+    const single = [3, 5, 7, 9, 15, 17, 19];
+    for (let start = 1; start <= 15; start++) {
+      // 開始フレットが start になる押さえ方（最小が start、最大が start+4）。
+      const voicing: Voicing = [null, start, start + 4, null, null, null];
+      expect(startFretOf(voicing)).toBe(start);
+      const { container, unmount } = render(<VoicingDiagram symbol="X" voicing={voicing} />);
+      const shown = marks(container, "inlay").map((m) => Number(m.dataset.fret));
+      const expected = Array.from({ length: 5 }, (_, k) => start + k).flatMap((f) =>
+        single.includes(f) ? [f] : f === 12 ? [12, 12] : [],
+      );
+      expect(shown).toEqual(expected);
+      unmount();
+    }
   });
 
   it("図の上にコード記号を出す", () => {
@@ -108,9 +177,9 @@ describe("VoicingDiagram（押さえ方の図）", () => {
         expect(marks(container, "dot")).toHaveLength(voicing.filter((f) => f !== null && f > 0).length);
         // 点とセーハは、どれも図の 5 フレットの中に収まる。
         for (const mark of [...marks(container, "dot"), ...marks(container, "barre")]) {
-          const row = Number(mark.dataset.row);
-          expect(row).toBeGreaterThanOrEqual(1);
-          expect(row).toBeLessThanOrEqual(5);
+          const cell = Number(mark.dataset.cell);
+          expect(cell).toBeGreaterThanOrEqual(1);
+          expect(cell).toBeLessThanOrEqual(5);
         }
         expect(marks(container, "barre")).toHaveLength(voicingFeatures(voicing).hasBarre ? 1 : 0);
         unmount();
