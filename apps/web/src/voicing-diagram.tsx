@@ -1,32 +1,50 @@
 import { voicingFeatures, type Voicing } from "@shirabe-chord/core";
 
 /** 図に描くフレットの数。 */
-const FRET_ROWS = 5;
+const FRET_COLUMNS = 5;
 const STRING_COUNT = 6;
 
-// 図の寸法（SVG の座標）。
-const LEFT = 34;
+// 図の寸法（SVG の座標）。ナットが左、1弦が上。
+const NUT_X = 40;
+const FRET_GAP = 28;
+const TOP = 14;
 const STRING_GAP = 16;
-const TOP = 36;
-const FRET_GAP = 20;
-const MARK_Y = 22;
+const MARK_X = 22;
 const DOT_RADIUS = 6;
-const WIDTH = LEFT + STRING_GAP * (STRING_COUNT - 1) + 22;
-const HEIGHT = TOP + FRET_GAP * FRET_ROWS + 8;
+const WIDTH = NUT_X + FRET_GAP * FRET_COLUMNS + 8;
+const STRINGS_BOTTOM = TOP + STRING_GAP * (STRING_COUNT - 1);
+const NUMBER_Y = STRINGS_BOTTOM + 16;
+const HEIGHT = NUMBER_Y + 6;
 
-/** 左から i 番目の弦（0 が 6弦）の x 座標。 */
-const stringX = (i: number) => LEFT + STRING_GAP * i;
-/** 弦の番号（6弦〜1弦）。 */
+/** 弦の番号（0 が 6弦 → 6、5 が 1弦 → 1）。 */
 const stringNumber = (i: number) => STRING_COUNT - i;
-const rowY = (row: number) => TOP + FRET_GAP * (row - 0.5);
+/** 弦 n（1弦が上）の y 座標。 */
+const stringY = (n: number) => TOP + STRING_GAP * (n - 1);
+/** 左から cell 番目（1 始まり）の枠の中央の x 座標。 */
+const cellX = (cell: number) => NUT_X + FRET_GAP * (cell - 0.5);
+
+/** ポジションマークの位置。フレット → 弦の組（a と b の間）。 */
+const INLAYS: Record<number, [number, number][]> = {
+  3: [[3, 4]],
+  5: [[3, 4]],
+  7: [[3, 4]],
+  9: [[3, 4]],
+  12: [
+    [2, 3],
+    [4, 5],
+  ],
+  15: [[3, 4]],
+  17: [[3, 4]],
+  19: [[3, 4]],
+};
 
 const pressedFrets = (voicing: Voicing) =>
   voicing.filter((fret): fret is number => fret !== null && fret > 0);
 
-/** 図の一番上のフレット。押さえる最大が 5 以下なら 1、それ以外は押さえる最小。押さえるフレットが無ければ 1。 */
+/** 図の左端のフレット。押さえる最大が 5 以下なら 1、それ以外は押さえる最小。押さえるフレットが無ければ 1。 */
 export function startFretOf(voicing: Voicing): number {
   const pressed = pressedFrets(voicing);
-  if (pressed.length === 0 || Math.max(...pressed) <= FRET_ROWS) return 1;
+  if (pressed.length === 0 || Math.max(...pressed) <= FRET_COLUMNS) return 1;
   return Math.min(...pressed);
 }
 
@@ -37,17 +55,18 @@ export function voicingLabel(symbol: string, voicing: Voicing): string {
   return `${symbol}: ${frets.join(separator)}`;
 }
 
-/** セーハの横棒の範囲。成り立たないときは undefined。 */
+/** セーハの縦棒の範囲。成り立たないときは undefined。 */
 function barreOf(voicing: Voicing, startFret: number) {
   if (!voicingFeatures(voicing).hasBarre) return undefined;
   const lowest = Math.min(...pressedFrets(voicing));
   const indices = voicing.flatMap((fret, i) => (fret === lowest ? [i] : []));
-  return { from: indices[0]!, to: indices[indices.length - 1]!, row: lowest - startFret + 1 };
+  return { from: indices[0]!, to: indices[indices.length - 1]!, cell: lowest - startFret + 1 };
 }
 
 export function VoicingDiagram({ symbol, voicing }: { symbol: string; voicing: Voicing }) {
   const startFret = startFretOf(voicing);
   const barre = barreOf(voicing, startFret);
+  const cells = Array.from({ length: FRET_COLUMNS }, (_, k) => k + 1);
 
   return (
     <figure className="diagram">
@@ -61,65 +80,103 @@ export function VoicingDiagram({ symbol, voicing }: { symbol: string; voicing: V
         stroke="currentColor"
         fill="none"
       >
-        {/* フレットの横線。開始フレットが 1 のときは、一番上（ナット）を太くする。 */}
-        {Array.from({ length: FRET_ROWS + 1 }, (_, k) => (
+        {/* フレットの縦線。開始フレットが 1 のときは、左端（ナット）を太くする。 */}
+        {Array.from({ length: FRET_COLUMNS + 1 }, (_, k) => {
+          const isNut = k === 0 && startFret === 1;
+          return (
+            <line
+              key={k}
+              data-mark={isNut ? "nut" : undefined}
+              x1={NUT_X + FRET_GAP * k}
+              x2={NUT_X + FRET_GAP * k}
+              y1={stringY(1)}
+              y2={stringY(STRING_COUNT)}
+              strokeWidth={isNut ? 4 : 1}
+            />
+          );
+        })}
+        {Array.from({ length: STRING_COUNT }, (_, i) => (
           <line
-            key={k}
-            x1={stringX(0)}
-            x2={stringX(STRING_COUNT - 1)}
-            y1={TOP + FRET_GAP * k}
-            y2={TOP + FRET_GAP * k}
-            strokeWidth={k === 0 && startFret === 1 ? 4 : 1}
+            key={i}
+            x1={NUT_X}
+            x2={NUT_X + FRET_GAP * FRET_COLUMNS}
+            y1={stringY(i + 1)}
+            y2={stringY(i + 1)}
           />
         ))}
-        {Array.from({ length: STRING_COUNT }, (_, i) => (
-          <line key={i} x1={stringX(i)} x2={stringX(i)} y1={TOP} y2={TOP + FRET_GAP * FRET_ROWS} />
-        ))}
-        {startFret > 1 && (
-          <text x={LEFT - 8} y={rowY(1) + 4} textAnchor="end" fontSize="12" fill="currentColor" stroke="none">
-            {`${startFret}fr`}
-          </text>
+        {/* ポジションマーク。押さえる丸やセーハの下になるよう先に描く。 */}
+        {cells.flatMap((cell) =>
+          (INLAYS[startFret + cell - 1] ?? []).map(([a, b]) => (
+            <circle
+              key={`${cell}-${a}`}
+              data-mark="inlay"
+              data-fret={startFret + cell - 1}
+              data-between-strings={`${a}-${b}`}
+              aria-hidden="true"
+              cx={cellX(cell)}
+              cy={(stringY(a) + stringY(b)) / 2}
+              r={DOT_RADIUS - 1}
+              fill="currentColor"
+              fillOpacity={0.15}
+              stroke="none"
+            />
+          )),
         )}
+        {cells.map((cell) => (
+          <text
+            key={cell}
+            data-mark="fret-number"
+            x={cellX(cell)}
+            y={NUMBER_Y}
+            textAnchor="middle"
+            fontSize="11"
+            fill="currentColor"
+            stroke="none"
+          >
+            {startFret + cell - 1}
+          </text>
+        ))}
         {barre && (
           <rect
             data-mark="barre"
-            data-row={barre.row}
+            data-cell={barre.cell}
             data-from-string={stringNumber(barre.from)}
             data-to-string={stringNumber(barre.to)}
-            x={stringX(barre.from) - DOT_RADIUS}
-            y={rowY(barre.row) - DOT_RADIUS}
-            width={stringX(barre.to) - stringX(barre.from) + DOT_RADIUS * 2}
-            height={DOT_RADIUS * 2}
+            x={cellX(barre.cell) - DOT_RADIUS}
+            y={stringY(stringNumber(barre.to)) - DOT_RADIUS}
+            width={DOT_RADIUS * 2}
+            height={stringY(stringNumber(barre.from)) - stringY(stringNumber(barre.to)) + DOT_RADIUS * 2}
             rx={DOT_RADIUS}
             fill="currentColor"
             stroke="none"
           />
         )}
         {voicing.map((fret, i) => {
-          const x = stringX(i);
           const string = stringNumber(i);
+          const y = stringY(string);
           if (fret === null) {
             return (
               <path
                 key={i}
                 data-mark="mute"
                 data-string={string}
-                d={`M${x - 5} ${MARK_Y - 5}L${x + 5} ${MARK_Y + 5}M${x + 5} ${MARK_Y - 5}L${x - 5} ${MARK_Y + 5}`}
+                data-x={MARK_X}
+                d={`M${MARK_X - 5} ${y - 5}L${MARK_X + 5} ${y + 5}M${MARK_X + 5} ${y - 5}L${MARK_X - 5} ${y + 5}`}
               />
             );
           }
           if (fret === 0) {
-            return <circle key={i} data-mark="open" data-string={string} cx={x} cy={MARK_Y} r={5} />;
+            return <circle key={i} data-mark="open" data-string={string} cx={MARK_X} cy={y} r={5} />;
           }
-          const row = fret - startFret + 1;
+          const cell = fret - startFret + 1;
           return (
             <circle
               key={i}
               data-mark="dot"
               data-string={string}
-              data-row={row}
-              cx={x}
-              cy={rowY(row)}
+              data-cell={cell}
+              cx={cellX(cell)}
+              cy={y}
               r={DOT_RADIUS}
               fill="currentColor"
               stroke="none"
