@@ -60,6 +60,17 @@ const QUALITIES: readonly Quality[] = [
   { names: ["7sus4"], required: [0, 5, 10], optional: [7] },
 ];
 
+/** 画面が選択肢に使う、種類の情報。音程は出さない。`names[0]` が記号に出す名前（三和音の M は空文字）。 */
+export type ChordQualityInfo = {
+  readonly names: readonly string[];
+  readonly tensionable: boolean;
+};
+
+export const CHORD_QUALITIES: readonly ChordQualityInfo[] = QUALITIES.map((q) => ({
+  names: q.names,
+  tensionable: q.tensionable === true,
+}));
+
 const QUALITY_BY_NAME: ReadonlyMap<string, Quality> = new Map(
   QUALITIES.flatMap((q) => q.names.map((name) => [name, q] as const)),
 );
@@ -74,7 +85,7 @@ const TENSION_SEMITONES: Readonly<Record<string, number>> = {
 };
 
 /** 同じ度数の「変化しない形」と「変化した形」は同時に指定できない。 */
-const CONFLICTING_TENSIONS: readonly (readonly string[])[] = [
+export const CONFLICTING_TENSIONS: readonly (readonly string[])[] = [
   ["9", "b9"],
   ["9", "#9"],
   ["13", "b13"],

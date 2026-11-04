@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { optimizeProgression, splitProgression } from "./progression.ts";
+import { MAX_PROGRESSION_CHORDS, optimizeProgression, optimizeSymbols, splitProgression } from "./progression.ts";
 import { chord, chordSymbols, show } from "./test-helpers.ts";
 import { generateVoicings, validateVoicing } from "./voicing.ts";
 
@@ -199,5 +199,46 @@ describe("optimizeProgression: 代表の進行", () => {
 
   it("C Am | F G7（`|` が入っても同じ並び）", () => {
     expect(picked("C Am | F G7")).toEqual(["x32010", "x02210", "133211", "320001"]);
+  });
+});
+
+describe("optimizeSymbols: 記号の配列から選ぶ", () => {
+  it("空の配列は empty", () => {
+    expect(optimizeSymbols([])).toEqual({ ok: false, reason: "empty" });
+  });
+
+  it("64 個ちょうどは受理し、65 個は too-many-chords", () => {
+    expect(MAX_PROGRESSION_CHORDS).toBe(64);
+    expect(optimizeSymbols(Array(64).fill("C")).ok).toBe(true);
+    expect(optimizeSymbols(Array(65).fill("C"))).toEqual({ ok: false, reason: "too-many-chords" });
+  });
+
+  it("連結すると 1000 文字を超える記号の列でも、64 個以内なら結果を返す（文字数は検査しない）", () => {
+    const symbols = Array(64).fill("F#m7(b9,#9,#11)/Bb");
+    expect(symbols.join(" ").length).toBeGreaterThan(1000);
+    const result = optimizeSymbols(symbols);
+    expect(result.ok && result.steps.length).toBe(64);
+  });
+
+  it("読めない記号と押さえ方が無い記号を、番号（0 始まり）・記号・理由つきで全部返す", () => {
+    expect(optimizeSymbols(["C", "H", "C7(b9,#9,#11)"])).toEqual({
+      ok: false,
+      reason: "invalid-chords",
+      chords: [
+        { index: 1, symbol: "H", reason: "invalid-root" },
+        { index: 2, symbol: "C7(b9,#9,#11)", reason: "no-voicing" },
+      ],
+    });
+  });
+
+  it("splitProgression で分けた結果を渡すと、optimizeProgression と同じ結果（成功・失敗とも。性質）", () => {
+    const piece = fc.oneof(chordSymbols, fc.constantFrom("H", "Cxyz", "C7(b9,#9,#11)", "|", "C7(9,b9)"));
+    fc.assert(
+      fc.property(fc.array(piece, { maxLength: 10 }), fc.constantFrom(" ", "\n", " | "), (list, separator) => {
+        const text = list.join(separator);
+        expect(optimizeSymbols(splitProgression(text))).toEqual(optimizeProgression(text));
+      }),
+      { numRuns: 50 },
+    );
   });
 });
