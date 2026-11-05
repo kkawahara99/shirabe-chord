@@ -187,3 +187,13 @@ describe("VoicingDiagram（押さえ方の図）", () => {
     },
   );
 });
+
+describe("VoicingDiagram の見出し", () => {
+  it("既定では記号の見出しを出す。hideCaption を指定すると見出しは出ず、図のラベルは残る", () => {
+    const { container, rerender } = render(<VoicingDiagram symbol="C" voicing={C} />);
+    expect(container.querySelector("figcaption")?.textContent).toBe("C");
+    rerender(<VoicingDiagram symbol="C" voicing={C} hideCaption />);
+    expect(container.querySelector("figcaption")).toBeNull();
+    expect(screen.getByRole("img").getAttribute("aria-label")).toBe("C: x32010");
+  });
+});

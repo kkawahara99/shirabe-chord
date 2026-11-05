@@ -63,14 +63,23 @@ function barreOf(voicing: Voicing, startFret: number) {
   return { from: indices[0]!, to: indices[indices.length - 1]!, cell: lowest - startFret + 1 };
 }
 
-export function VoicingDiagram({ symbol, voicing }: { symbol: string; voicing: Voicing }) {
+/** `hideCaption` は、見出しの記号が隣にもあるとき（カード）に重複を避けるためのもの。図のラベルは残る。 */
+export function VoicingDiagram({
+  symbol,
+  voicing,
+  hideCaption = false,
+}: {
+  symbol: string;
+  voicing: Voicing;
+  hideCaption?: boolean;
+}) {
   const startFret = startFretOf(voicing);
   const barre = barreOf(voicing, startFret);
   const cells = Array.from({ length: FRET_COLUMNS }, (_, k) => k + 1);
 
   return (
     <figure className="diagram">
-      <figcaption>{symbol}</figcaption>
+      {!hideCaption && <figcaption>{symbol}</figcaption>}
       <svg
         role="img"
         aria-label={voicingLabel(symbol, voicing)}

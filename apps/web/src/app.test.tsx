@@ -1,6 +1,6 @@
 import { listShapesByLowestFret, optimizeSymbols } from "@shirabe-chord/core";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { App } from "./app.tsx";
 import { voicingLabel } from "./voicing-diagram.tsx";
 
@@ -26,9 +26,15 @@ const pressedIndex = () => chordButtons().findIndex((button) => button.getAttrib
 const PICKER = "最初のコードの押さえ方の候補";
 const AUTO = "おまかせ（押さえ方を自動で選ぶ）";
 const INITIAL = ["C", "Am", "F", "G7"];
-const autoButton = () => screen.getByRole("button", { name: AUTO });
-const cards = () => within(screen.getByRole("group", { name: PICKER })).getAllByRole("listitem");
-const cardButton = (i: number) => within(cards()[i]!).getByRole("button", { name: "この押さえ方にする" });
+const autoButton = () => {
+  showTab("押さえ方");
+  return screen.getByRole("button", { name: AUTO });
+};
+const cards = () => {
+  showTab("押さえ方");
+  return within(screen.getByRole("group", { name: PICKER })).getAllByRole("listitem");
+};
+const cardButton = (i: number) => within(cards()[i]!).getByRole("button", { name: `${firstShapes(chordSymbols()[0]!)[i]!.lowestFret}フレット付近` });
 const cardPressed = () => cards().map((_, i) => cardButton(i).getAttribute("aria-pressed"));
 const firstShapes = (symbol: string) => {
   const shapes = listShapesByLowestFret(symbol);
@@ -45,7 +51,36 @@ const expectedLabels = (symbols: string[], shapeIndex?: number) => {
 };
 const resultLabels = () => diagrams().map((d) => d.getAttribute("aria-label"));
 
-const group = (name: string) => screen.getByRole("group", { name });
+/** 編集欄のタブ。 */
+const TABS = "編集の項目";
+const tabButtons = () => within(screen.getByRole("group", { name: TABS })).getAllByRole("button");
+const tabButton = (name: string) => within(screen.getByRole("group", { name: TABS })).getByRole("button", { name });
+const queryTabButton = (name: string) =>
+  within(screen.getByRole("group", { name: TABS })).queryByRole("button", { name });
+const pressedTab = () => tabButtons().find((b) => b.getAttribute("aria-pressed") === "true")?.textContent;
+const showTab = (name: string) => {
+  const button = tabButton(name);
+  if (button.getAttribute("aria-pressed") !== "true") fireEvent.click(button);
+};
+/** 入力の組が入っているタブ。組を取るときは、そのタブを開く。 */
+const TAB_OF: Record<string, string> = {
+  根音の音名: "コード",
+  根音の変化記号: "コード",
+  種類: "コード",
+  テンション: "テンション・ベース",
+  ベース音の音名: "テンション・ベース",
+  ベース音の変化記号: "テンション・ベース",
+};
+const group = (name: string) => {
+  const tab = TAB_OF[name];
+  if (tab) showTab(tab);
+  return screen.getByRole("group", { name });
+};
+const editorRegion = () => screen.getByRole("region", { name: /番目のコードを編集$/ });
+const closeButton = () => screen.getByRole("button", { name: "閉じる" });
+const closePanel = () => fireEvent.click(closeButton());
+const openRail = () => fireEvent.click(screen.getByRole("button", { name: "編集を開く" }));
+const handButton = () => screen.getByRole("button", { name: /^手の位置：/ }) as HTMLButtonElement;
 const radio = (groupName: string, label: string) =>
   within(group(groupName)).getByRole("radio", { name: label }) as HTMLInputElement;
 const checkbox = (label: string) =>
@@ -220,7 +255,7 @@ describe("App（画面全体）", () => {
     expect(diagrams()).toHaveLength(4);
   });
 
-  it("最初のコードの下に、最低フレットごとの図が listShapesByLowestFret と同じ数だけ並び、各カードに「Nフレット付近」と「この押さえ方にする」がある", () => {
+  it("「押さえ方」タブに、最低フレットごとの図が listShapesByLowestFret と同じ数だけ並び、各カードに「Nフレット付近」のボタンが 1 つある", () => {
     render(<App />);
     const shapes = firstShapes("C");
     expect(cards()).toHaveLength(shapes.length);
@@ -231,31 +266,25 @@ describe("App（画面全体）", () => {
     });
   });
 
-  it("候補の図の並びはラベル付きの領域に入り、「←」「→」ボタンは 1 枚ぶんスクロールするだけで、選択を変えない", () => {
+  it("候補の図の並びはラベル付きの領域に入り、各カードの図に記号の見出しは出ない", () => {
     render(<App />);
-    const scroller = screen.getByRole("group", { name: PICKER });
-    const scrollBy = vi.fn();
-    scroller.scrollBy = scrollBy;
-    const left = screen.getByRole("button", { name: "前の押さえ方へスクロール" });
-    const right = screen.getByRole("button", { name: "次の押さえ方へスクロール" });
-    expect(left.textContent).toBe("←");
-    expect(right.textContent).toBe("→");
-    fireEvent.click(right);
-    fireEvent.click(left);
-    expect(scrollBy).toHaveBeenCalledTimes(2);
-    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
-    expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+    showTab("押さえ方");
+    const picker = screen.getByRole("group", { name: PICKER });
+    expect(picker.querySelectorAll("figure").length).toBeGreaterThan(0);
+    expect(picker.querySelector("figcaption")).toBeNull();
   });
 
-  it("最初のコードに押さえ方が無いとき、位置ごとの図の部品（おまかせ・候補）は出ない", () => {
+  it("最初のコードに押さえ方が無いとき、「押さえ方」タブは出ず、手の位置のボタンは押せない", () => {
     render(<App />);
     pick("種類", "7");
     toggle("b9");
     toggle("#9");
     toggle("#11");
     expect(within(screen.getByRole("region", { name: "進行の押さえ方" })).getByRole("alert")).toBeTruthy();
+    expect(queryTabButton("押さえ方")).toBeNull();
     expect(screen.queryByRole("group", { name: PICKER })).toBeNull();
     expect(screen.queryByRole("button", { name: AUTO })).toBeNull();
+    expect(handButton().disabled).toBe(true);
   });
 
   it("初めは「おまかせ」だけが押された状態で、結果は選択なしの最適化と同じ", () => {
@@ -265,7 +294,7 @@ describe("App（画面全体）", () => {
     expect(resultLabels()).toEqual(expectedLabels(INITIAL));
   });
 
-  it("カードの「この押さえ方にする」を押すと、そのボタンだけ押された状態になり、最初の図がその押さえ方になり、続く図が再計算される", () => {
+  it("候補のカードの「Nフレット付近」ボタンを押すと、そのボタンだけ押された状態になり、最初の図がその押さえ方になり、続く図が再計算される", () => {
     render(<App />);
     const shapes = firstShapes("C");
     const index = shapes.length - 1; // ネックの付け根寄り
@@ -319,6 +348,7 @@ describe("App（画面全体）", () => {
     fireEvent.click(cardButton(3));
     select(1);
     pick("種類", "m7");
+    select(0);
     expect(cardButton(3).getAttribute("aria-pressed")).toBe("true");
     expect(resultLabels()).toEqual(expectedLabels(["C", "Am7", "F", "G7"], 3));
     remove(4);
@@ -338,6 +368,7 @@ describe("App（画面全体）", () => {
     toggle("#11");
     expect(chordSymbols()[1]).toBe("Db7(b9,#11)");
     expect(outOfWindow()).toHaveLength(0); // おまかせ
+    select(0);
     const shapes = firstShapes("C");
     const index = shapes.findIndex((shape) => shape.lowestFret === 10);
     expect(index).toBeGreaterThanOrEqual(0);
@@ -369,4 +400,385 @@ describe("App（画面全体）", () => {
       expect(rawSources[name], name).not.toContain(forbidden);
     }
   });
+});
+
+describe("App（配置・編集パネル・開閉）", () => {
+  const cardItems = () => within(screen.getByRole("list", { name: "コード進行" })).getAllByRole("listitem");
+  const cardOf = (i: number) => chordButtons()[i]!.closest("li")!;
+  const heading = () => within(editorRegion()).getByRole("heading", { name: /番目のコードを編集$/ }).textContent;
+  const hasNoGroup = (name: string) => screen.queryByRole("group", { name }) === null;
+
+  it("初期表示で、編集パネルが開き、見出しが「1番目のコードを編集」で隣に記号 C が出る", () => {
+    render(<App />);
+    expect(heading()).toBe("1番目のコードを編集");
+    expect(editorRegion().querySelector(".editor-symbol")?.textContent).toBe("C");
+    expect(screen.queryByRole("button", { name: "編集を開く" })).toBeNull();
+  });
+
+  it("カードは、番号がボタンの外にあり、ボタン名は記号だけで、図（figure）はボタンの外にあり、図の見出しは出ない", () => {
+    render(<App />);
+    const card = cardOf(1);
+    const button = within(card).getByRole("button", { name: "Am" });
+    expect(button.textContent).toBe("Am");
+    const number = card.querySelector(".step-number");
+    expect(number?.textContent).toBe("2");
+    expect(button.contains(number)).toBe(false);
+    const figure = card.querySelector("figure");
+    expect(figure).not.toBeNull();
+    expect(button.contains(figure)).toBe(false);
+    expect(card.querySelector("figcaption")).toBeNull();
+    expect(card.classList.contains("step")).toBe(true);
+  });
+
+  it("コード進行の一覧は、コードの数だけカードを並べ、最後の項目に「＋ コードを追加」を置く", () => {
+    render(<App />);
+    const items = cardItems();
+    expect(items).toHaveLength(5);
+    expect(within(items[4]!).getByRole("button", { name: "＋ コードを追加" })).toBeTruthy();
+    expect(items.slice(0, 4).every((item) => item.classList.contains("step"))).toBe(true);
+  });
+
+  it("DOM の順は、ヘッダー → 編集欄 → 譜面", () => {
+    const { container } = render(<App />);
+    const header = container.querySelector("header")!;
+    const score = screen.getByRole("region", { name: "進行の押さえ方" });
+    expect(header.compareDocumentPosition(editorRegion()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(editorRegion().compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("カードの記号を押すと選択が移り、見出しが「2番目のコードを編集」になり、タブは「コード」になる", () => {
+    render(<App />);
+    select(1);
+    expect(pressedIndex()).toBe(1);
+    expect(heading()).toBe("2番目のコードを編集");
+    expect(pressedTab()).toBe("コード");
+  });
+
+  it("押さえ方が無いコードがあっても、全コードのカードが番号と記号だけで出て、メッセージは譜面の領域の中で一覧の上に出る", () => {
+    render(<App />);
+    pick("種類", "7");
+    toggle("b9");
+    toggle("#9");
+    toggle("#11");
+    const region = screen.getByRole("region", { name: "進行の押さえ方" });
+    const message = within(region).getByRole("alert");
+    const list = within(region).getByRole("list", { name: "コード進行" });
+    expect(message.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chordSymbols()).toEqual(["C7(b9,#9,#11)", "Am", "F", "G7"]);
+    expect(within(list).queryAllByRole("img")).toHaveLength(0);
+    expect(within(cardOf(2)).getByText("3")).toBeTruthy();
+    // 直すと図が戻る
+    toggle("#11");
+    expect(alert()).toBeNull();
+    expect(diagrams()).toHaveLength(4);
+  });
+
+  it("初めは「コード」タブで、根音・種類の組だけが出る（テンション・ベースの組は出ない）", () => {
+    render(<App />);
+    expect(pressedTab()).toBe("コード");
+    for (const name of ["根音の音名", "根音の変化記号", "種類"]) expect(hasNoGroup(name)).toBe(false);
+    for (const name of ["テンション", "ベース音の音名", "ベース音の変化記号"]) expect(hasNoGroup(name)).toBe(true);
+  });
+
+  it("「テンション・ベース」タブには、テンションとベース音の組だけが出る", () => {
+    render(<App />);
+    showTab("テンション・ベース");
+    for (const name of ["テンション", "ベース音の音名", "ベース音の変化記号"]) expect(hasNoGroup(name)).toBe(false);
+    for (const name of ["根音の音名", "根音の変化記号", "種類"]) expect(hasNoGroup(name)).toBe(true);
+  });
+
+  it("タブは aria-pressed のボタンで、押したタブだけが true になる", () => {
+    render(<App />);
+    expect(tabButtons().map((b) => b.textContent)).toEqual(["コード", "テンション・ベース", "押さえ方"]);
+    expect(tabButtons().every((b) => b.getAttribute("type") === "button" && b.hasAttribute("aria-pressed"))).toBe(true);
+    fireEvent.click(tabButton("押さえ方"));
+    expect(tabButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "false", "true"]);
+    fireEvent.click(tabButton("テンション・ベース"));
+    expect(tabButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "true", "false"]);
+  });
+
+  it("「押さえ方」タブは、1番目のコードを選んでいて候補があるときだけ出る（2番目を選ぶと出ない）", () => {
+    render(<App />);
+    expect(queryTabButton("押さえ方")).not.toBeNull();
+    select(1);
+    expect(queryTabButton("押さえ方")).toBeNull();
+    select(0);
+    expect(queryTabButton("押さえ方")).not.toBeNull();
+  });
+
+  it("「押さえ方」タブの中身は、おまかせと候補の図（最初のコードの押さえ方）である", () => {
+    render(<App />);
+    fireEvent.click(tabButton("押さえ方"));
+    expect(screen.getByRole("button", { name: AUTO })).toBeTruthy();
+    expect(screen.getByRole("group", { name: PICKER })).toBeTruthy();
+    expect(hasNoGroup("種類")).toBe(true);
+  });
+
+  it("選択中のコードが変わると、タブは「コード」に戻る（カードの選択・追加・選択中の削除）", () => {
+    render(<App />);
+    showTab("押さえ方");
+    select(2);
+    expect(pressedTab()).toBe("コード");
+    showTab("テンション・ベース");
+    add();
+    expect(pressedTab()).toBe("コード");
+    showTab("テンション・ベース");
+    remove(5); // 選んでいる末尾を消す
+    expect(pressedTab()).toBe("コード");
+    select(0);
+    showTab("テンション・ベース");
+    remove(1); // 選んでいる先頭を消す（次のコードが繰り上がる）
+    expect(pressedTab()).toBe("コード");
+  });
+
+  it("タブは戻らない: 選んでいるカードを押し直したとき、選んでいないコードの削除で番号だけずれたとき", () => {
+    render(<App />);
+    select(2); // F
+    showTab("テンション・ベース");
+    select(2);
+    expect(pressedTab()).toBe("テンション・ベース");
+    remove(1); // 手前の C を消す。F の番号が 3 → 2 になる
+    expect(chordSymbols()[pressedIndex()]).toBe("F");
+    expect(pressedTab()).toBe("テンション・ベース");
+    remove(3); // 後ろの G7 を消す
+    expect(pressedTab()).toBe("テンション・ベース");
+  });
+
+  it("編集で記号が変わっても、タブは戻らない", () => {
+    render(<App />);
+    showTab("テンション・ベース");
+    pick("ベース音の音名", "G");
+    expect(chordSymbols()[0]).toBe("C/G");
+    expect(pressedTab()).toBe("テンション・ベース");
+    showTab("コード");
+    pick("種類", "7");
+    expect(chordSymbols()[0]).toBe("C7/G");
+    expect(pressedTab()).toBe("コード");
+    showTab("テンション・ベース");
+    toggle("9");
+    expect(chordSymbols()[0]).toBe("C7(9)/G");
+    expect(pressedTab()).toBe("テンション・ベース");
+  });
+
+  it("「閉じる」を押すと、編集の部品が消えて「編集を開く」のボタンだけが残り、どのカードも選択の印が付かない", () => {
+    render(<App />);
+    closePanel();
+    expect(screen.queryByRole("region", { name: /番目のコードを編集$/ })).toBeNull();
+    expect(screen.queryByRole("group", { name: TABS })).toBeNull();
+    expect(screen.queryByRole("button", { name: "閉じる" })).toBeNull();
+    expect(screen.getByRole("button", { name: "編集を開く" })).toBeTruthy();
+    expect(chordButtons().map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "false", "false", "false"]);
+    expect(diagrams()).toHaveLength(4);
+  });
+
+  it("帯のボタンで開くと、閉じる前のコードとタブで開く（選んだ押さえ方も保たれる）", () => {
+    render(<App />);
+    select(2);
+    showTab("テンション・ベース");
+    closePanel();
+    openRail();
+    expect(pressedIndex()).toBe(2);
+    expect(pressedTab()).toBe("テンション・ベース");
+    select(0);
+    fireEvent.click(cardButton(3));
+    expect(pressedTab()).toBe("押さえ方");
+    closePanel();
+    openRail();
+    expect(pressedIndex()).toBe(0);
+    expect(pressedTab()).toBe("押さえ方");
+    expect(cardButton(3).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("閉じている間にカードを押すと、そのコードで開く", () => {
+    render(<App />);
+    closePanel();
+    select(1);
+    expect(heading()).toBe("2番目のコードを編集");
+    expect(pressedIndex()).toBe(1);
+    expect(pressedTab()).toBe("コード");
+  });
+
+  it("閉じている間に「＋ コードを追加」を押すと、増えたコードで開く", () => {
+    render(<App />);
+    closePanel();
+    add();
+    expect(heading()).toBe("5番目のコードを編集");
+    expect(pressedIndex()).toBe(4);
+  });
+
+  it("開いているとき、選択中のカードを押しても閉じない", () => {
+    render(<App />);
+    select(0);
+    select(0);
+    expect(heading()).toBe("1番目のコードを編集");
+    expect(screen.queryByRole("button", { name: "編集を開く" })).toBeNull();
+  });
+
+  it("閉じている間にコードを削除しても開かず、選択の番号は削除の規則で動く（開くとそのコードが選ばれている）", () => {
+    render(<App />);
+    select(2); // F
+    closePanel();
+    remove(1); // 手前を消すと、F は 2 番目になる
+    expect(screen.queryByRole("region", { name: /番目のコードを編集$/ })).toBeNull();
+    openRail();
+    expect(chordSymbols()[pressedIndex()]).toBe("F");
+    closePanel();
+    remove(2); // 選んでいる F を消すと、1 つ前の Am が選ばれる
+    expect(screen.queryByRole("region", { name: /番目のコードを編集$/ })).toBeNull();
+    openRail();
+    expect(chordSymbols()[pressedIndex()]).toBe("Am");
+  });
+
+  it("「閉じる」を押すと、選択中だったカードの記号のボタンにフォーカスが移る", () => {
+    render(<App />);
+    select(2);
+    closePanel();
+    expect(document.activeElement).toBe(chordButtons()[2]);
+  });
+
+  it("帯のボタンで開くと、「閉じる」にフォーカスが移る", () => {
+    render(<App />);
+    closePanel();
+    openRail();
+    expect(document.activeElement).toBe(closeButton());
+  });
+
+  it("カード・「＋ コードを追加」・手の位置のボタンで開いたときは、「閉じる」にフォーカスを動かさない", () => {
+    render(<App />);
+    closePanel();
+    select(1);
+    expect(document.activeElement).not.toBe(closeButton());
+    closePanel();
+    add();
+    expect(document.activeElement).not.toBe(closeButton());
+    closePanel();
+    fireEvent.click(handButton());
+    expect(screen.getByRole("button", { name: "閉じる" })).toBeTruthy();
+    expect(document.activeElement).not.toBe(closeButton());
+  });
+
+  it("ヘッダーにサイト名と説明文があり、手の位置のボタンは「おまかせ」では「手の位置：おまかせ」、選ぶと「手の位置：Nフレット付近」になる", () => {
+    const { container } = render(<App />);
+    const header = container.querySelector("header")!;
+    expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("shirabe-chord");
+    expect(header.textContent).toContain("コード進行を組み立てると");
+    expect(handButton().textContent).toBe("手の位置：おまかせ");
+    const shapes = firstShapes("C");
+    fireEvent.click(cardButton(3));
+    expect(handButton().textContent).toBe(`手の位置：${shapes[3]!.lowestFret}フレット付近`);
+    fireEvent.click(autoButton());
+    expect(handButton().textContent).toBe("手の位置：おまかせ");
+  });
+
+  it("手の位置のボタンを押すと、3番目を選んで閉じていても、1番目を選んでパネルを開き「押さえ方」タブを出す。1番目が選択中でも「押さえ方」にする", () => {
+    render(<App />);
+    select(2);
+    closePanel();
+    fireEvent.click(handButton());
+    expect(pressedIndex()).toBe(0);
+    expect(pressedTab()).toBe("押さえ方");
+    showTab("コード");
+    fireEvent.click(handButton());
+    expect(pressedIndex()).toBe(0);
+    expect(pressedTab()).toBe("押さえ方");
+  });
+
+  it("「押さえ方の選び方」は、ヘッダーの中の領域にある開閉の部品（summary は「選び方」）で、4 つの点を含む", () => {
+    const { container } = render(<App />);
+    const region = screen.getByRole("region", { name: "押さえ方の選び方" });
+    expect(container.querySelector("header")!.contains(region)).toBe(true);
+    expect(region.querySelector("details > summary")?.textContent).toBe("選び方");
+    expect(region.querySelectorAll("li")).toHaveLength(4);
+  });
+
+  it("操作をランダムに数百回くり返しても、選択の番号は範囲内で、選択中のカードは開いていればちょうど 1 枚（閉じていれば 0 枚）、押されたタブはちょうど 1 つ、「押さえ方」タブは出せるときだけ出る", () => {
+    const random = (seed: number) => () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const qualities = ["M", "m", "7", "M7", "sus4", "dim7"];
+    for (const seed of [1, 2, 3]) {
+      const next = random(seed);
+      const below = (n: number) => Math.floor(next() * n);
+      const { unmount } = render(<App />);
+      let count = 4;
+      let open = true;
+      const check = () => {
+        const buttons = chordButtons();
+        expect(buttons).toHaveLength(count);
+        const pressed = buttons.filter((b) => b.getAttribute("aria-pressed") === "true");
+        if (!open) {
+          expect(pressed).toHaveLength(0);
+          expect(screen.queryByRole("group", { name: TABS })).toBeNull();
+          return;
+        }
+        expect(pressed).toHaveLength(1);
+        const number = Number(/^(\d+)番目/.exec(heading()!)![1]);
+        expect(number).toBe(pressedIndex() + 1);
+        expect(number).toBeLessThanOrEqual(count);
+        expect(tabButtons().filter((b) => b.getAttribute("aria-pressed") === "true")).toHaveLength(1);
+        const first = listShapesByLowestFret(chordSymbols()[0]!);
+        const canShowShape = pressedIndex() === 0 && first.ok && first.shapes.length > 0;
+        expect(queryTabButton("押さえ方") !== null).toBe(canShowShape);
+      };
+      const operations: (() => void)[] = [
+        () => {
+          select(below(count));
+          open = true;
+        },
+        () => {
+          if (count >= 8) return;
+          add();
+          count++;
+          open = true;
+        },
+        () => {
+          if (count <= 1) return;
+          remove(below(count) + 1);
+          count--;
+        },
+        () => {
+          if (!open) return;
+          const names = tabButtons().map((b) => b.textContent!);
+          showTab(names[below(names.length)]!);
+        },
+        () => {
+          if (!open) return;
+          closePanel();
+          open = false;
+        },
+        () => {
+          if (open) return;
+          openRail();
+          open = true;
+        },
+        () => {
+          if (handButton().disabled) return;
+          fireEvent.click(handButton());
+          open = true;
+        },
+        () => {
+          if (!open) return;
+          pick("種類", qualities[below(qualities.length)]!);
+        },
+        () => {
+          // 最初のコードを、押さえ方の無いコード（C7(b9,#9,#11)）にする
+          select(0);
+          open = true;
+          pick("根音の音名", "C");
+          pick("根音の変化記号", "なし");
+          pick("種類", "m");
+          pick("種類", "7");
+          for (const tension of ["b9", "#9", "#11"]) toggle(tension);
+        },
+      ];
+      for (let step = 0; step < 150; step++) {
+        operations[below(operations.length)]!();
+        check();
+      }
+      unmount();
+    }
+  }, 60_000);
 });

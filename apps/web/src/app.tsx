@@ -15,7 +15,7 @@ import {
   type Shape,
   type Tension,
 } from "@shirabe-chord/core";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ShapePicker } from "./shape-picker.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
@@ -143,17 +143,8 @@ function NotePicker(props: {
   );
 }
 
-function ChordEditor(props: { selection: ChordSelection; onChange: (selection: ChordSelection) => void }) {
+function ChordTab(props: { selection: ChordSelection; onChange: (selection: ChordSelection) => void }) {
   const { selection, onChange } = props;
-  const tensionable = TENSIONABLE.has(selection.quality);
-  const blocked = new Set<Tension>(selection.tensions.flatMap((t) => tensionsConflictingWith(t)));
-
-  const toggleTension = (tension: Tension, checked: boolean) =>
-    onChange({
-      ...selection,
-      tensions: checked ? [...selection.tensions, tension] : selection.tensions.filter((t) => t !== tension),
-    });
-
   return (
     <>
       <NotePicker
@@ -170,26 +161,45 @@ function ChordEditor(props: { selection: ChordSelection; onChange: (selection: C
             <span id={`quality-group-${i}`} className="quality-group-title">
               {qualityGroup.title}
             </span>
-            {qualityGroup.names.map((name) => (
-              <label key={name} className="choice">
-                <input
-                  type="radio"
-                  name="quality"
-                  checked={selection.quality === name}
-                  onChange={() =>
-                    onChange({
-                      ...selection,
-                      quality: name,
-                      tensions: TENSIONABLE.has(name) ? selection.tensions : [],
-                    })
-                  }
-                />
-                {name === "" ? "M" : name}
-              </label>
-            ))}
+            <div className="quality-chips">
+              {qualityGroup.names.map((name) => (
+                <label key={name} className="choice">
+                  <input
+                    type="radio"
+                    name="quality"
+                    checked={selection.quality === name}
+                    onChange={() =>
+                      onChange({
+                        ...selection,
+                        quality: name,
+                        tensions: TENSIONABLE.has(name) ? selection.tensions : [],
+                      })
+                    }
+                  />
+                  {name === "" ? "M" : name}
+                </label>
+              ))}
+            </div>
           </div>
         ))}
       </fieldset>
+    </>
+  );
+}
+
+function ExtrasTab(props: { selection: ChordSelection; onChange: (selection: ChordSelection) => void }) {
+  const { selection, onChange } = props;
+  const tensionable = TENSIONABLE.has(selection.quality);
+  const blocked = new Set<Tension>(selection.tensions.flatMap((t) => tensionsConflictingWith(t)));
+
+  const toggleTension = (tension: Tension, checked: boolean) =>
+    onChange({
+      ...selection,
+      tensions: checked ? [...selection.tensions, tension] : selection.tensions.filter((t) => t !== tension),
+    });
+
+  return (
+    <>
       <fieldset className="choices" disabled={!tensionable}>
         <legend>テンション</legend>
         {TENSIONS.map((tension) => (
@@ -215,12 +225,28 @@ function ChordEditor(props: { selection: ChordSelection; onChange: (selection: C
   );
 }
 
+type EditorTab = "chord" | "extras" | "shape";
+const TAB_LABELS: Record<EditorTab, string> = { chord: "コード", extras: "テンション・ベース", shape: "押さえ方" };
+
 export function App() {
   const [chords, setChords] = useState<readonly ChordSelection[]>(INITIAL_CHORDS);
+  /** 選んでいるコードの番号。パネルを閉じている間も覚えておく。 */
   const [selected, setSelected] = useState(0);
+  const [open, setOpen] = useState(true);
+  const [tab, setTab] = useState<EditorTab>("chord");
 
   /** 最初のコードで選んだ押さえ方。`null` は「おまかせ」。先頭の記号が変わる・先頭が消えるたびに `null` に戻す。 */
   const [picked, setPicked] = useState<Shape | null>(null);
+
+  const cardButtons = useRef<(HTMLButtonElement | null)[]>([]);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  /** 描画のあとでフォーカスを移す先。開閉の操作の時点では、移す先の要素がまだ無い（開くとき）か、まだ残っている（閉じるとき）。 */
+  const pendingFocus = useRef<"card" | "close" | null>(null);
+  useEffect(() => {
+    if (pendingFocus.current === "card") cardButtons.current[selected]?.focus();
+    if (pendingFocus.current === "close") closeButton.current?.focus();
+    pendingFocus.current = null;
+  });
 
   const symbols = chords.map(symbolOf);
   const joined = symbols.join(" ");
@@ -230,90 +256,159 @@ export function App() {
     [joined, picked], // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
   );
 
+  const hasShapes = shapes.ok && shapes.shapes.length > 0;
+  /** 「押さえ方」タブは、1 番目のコードを選んでいて、候補があるときだけ出せる。 */
+  const shapeTabAvailable = selected === 0 && hasShapes;
+  const shownTab: EditorTab = tab === "shape" && !shapeTabAvailable ? "chord" : tab;
+  const tabs: EditorTab[] = shapeTabAvailable ? ["chord", "extras", "shape"] : ["chord", "extras"];
+
+  /** 選ぶコードを変えるとき、タブを「コード」に戻す（同じコードを選び直すときは戻さない）。 */
+  const chooseChord = (index: number) => {
+    if (index !== selected) setTab("chord");
+    setSelected(index);
+    setOpen(true);
+  };
   const addChord = () => {
     setChords([...chords, NEW_CHORD]);
-    setSelected(chords.length);
+    chooseChord(chords.length);
   };
   const removeChord = (index: number) => {
     setChords(chords.filter((_, i) => i !== index));
     if (index === 0) setPicked(null);
     if (index < selected) setSelected(selected - 1);
-    else if (index === selected) setSelected(Math.max(0, index - 1));
+    else if (index === selected) {
+      setSelected(Math.max(0, index - 1));
+      setTab("chord");
+    }
   };
   const changeSelected = (selection: ChordSelection) => {
     if (selected === 0 && symbolOf(selection) !== symbols[0]) setPicked(null);
     setChords(chords.map((chord, i) => (i === selected ? selection : chord)));
   };
+  const closePanel = () => {
+    pendingFocus.current = "card";
+    setOpen(false);
+  };
+  const openFromRail = () => {
+    pendingFocus.current = "close";
+    setOpen(true);
+  };
+  const showHandPosition = () => {
+    setSelected(0);
+    setTab("shape");
+    setOpen(true);
+  };
 
   return (
-    <main>
-      <h1>shirabe-chord</h1>
-      <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
-      <ul className="chords" aria-label="コード進行">
-        {symbols.map((symbol, i) => (
-          <li key={i} className="chord-item">
-            <button type="button" aria-pressed={i === selected} onClick={() => setSelected(i)}>
-              {symbol}
-            </button>
-            <button
-              type="button"
-              aria-label={`${i + 1}番目のコードを削除`}
-              disabled={chords.length <= 1}
-              onClick={() => removeChord(i)}
-            >
-              ×
-            </button>
-          </li>
-        ))}
-        <li>
-          <button type="button" disabled={chords.length >= MAX_PROGRESSION_CHORDS} onClick={addChord}>
-            ＋ コードを追加
-          </button>
-        </li>
-      </ul>
-      <section aria-labelledby="editor-title">
-        <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
-        <ChordEditor selection={chords[selected]!} onChange={changeSelected} />
-      </section>
-      {shapes.ok && (
-        <ShapePicker
-          symbol={symbols[0]!}
-          shapes={shapes.shapes}
-          pickedIndex={picked?.candidateIndex ?? null}
-          onPick={setPicked}
-        />
-      )}
-      <section aria-label="進行の押さえ方">
-        {result.ok ? (
-          <div className="diagrams">
-            {result.steps.map((step, i) => (
-              <div key={i} className="step">
-                <VoicingDiagram symbol={step.symbol} voicing={step.voicing} />
-                {step.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div role="alert" className="failures">
+    <div className="app">
+      <header className="site-header">
+        <div className="site-title">
+          <h1>shirabe-chord</h1>
+          <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
+        </div>
+        <button type="button" className="hand-button" disabled={!hasShapes} onClick={showHandPosition}>
+          手の位置：{picked ? `${picked.lowestFret}フレット付近` : "おまかせ"}
+        </button>
+        <section aria-label="押さえ方の選び方" className="how">
+          <details>
+            <summary>選び方</summary>
             <ul>
-              {failureMessages(result).map((message, i) => (
-                <li key={i}>{message}</li>
-              ))}
+              <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
+              <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
+              <li>
+                手の位置を選ぶと、最初のコードの最低フレットから5フレット分に収まる押さえ方から選びます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
+              </li>
+              <li>位置を選べるのは最初のコードだけです。</li>
             </ul>
-          </div>
-        )}
-      </section>
-      <section aria-labelledby="how-title">
-        <h2 id="how-title">押さえ方の選び方</h2>
-        <ul>
-          <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
-          <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
-          <li>
-            手の位置を選ぶと、最初のコードの最低フレットから5フレット分に収まる押さえ方から選びます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
-          </li>
-          <li>位置を選べるのは最初のコードだけです。</li>
-        </ul>
-      </section>
-    </main>
+          </details>
+        </section>
+      </header>
+      <div className="body">
+        <aside className={open ? "panel" : "panel closed"}>
+          {open ? (
+            <section aria-labelledby="editor-title" className="editor">
+              <div className="editor-head">
+                <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
+                <span className="editor-symbol">{symbols[selected]}</span>
+                <button type="button" ref={closeButton} onClick={closePanel}>
+                  閉じる
+                </button>
+              </div>
+              <div role="group" aria-label="編集の項目" className="tabs">
+                {tabs.map((name) => (
+                  <button key={name} type="button" aria-pressed={name === shownTab} onClick={() => setTab(name)}>
+                    {TAB_LABELS[name]}
+                  </button>
+                ))}
+              </div>
+              <div className="tab-body">
+                {shownTab === "chord" && <ChordTab selection={chords[selected]!} onChange={changeSelected} />}
+                {shownTab === "extras" && <ExtrasTab selection={chords[selected]!} onChange={changeSelected} />}
+                {shownTab === "shape" && shapes.ok && (
+                  <ShapePicker
+                    symbol={symbols[0]!}
+                    shapes={shapes.shapes}
+                    pickedIndex={picked?.candidateIndex ?? null}
+                    onPick={setPicked}
+                  />
+                )}
+              </div>
+            </section>
+          ) : (
+            <button type="button" className="rail-button" onClick={openFromRail}>
+              編集を開く
+            </button>
+          )}
+        </aside>
+        <section aria-label="進行の押さえ方" className="score">
+          {!result.ok && (
+            <div role="alert" className="failures">
+              <ul>
+                {failureMessages(result).map((message, i) => (
+                  <li key={i}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <ul className="steps" aria-label="コード進行">
+            {symbols.map((symbol, i) => {
+              const step = result.ok ? result.steps[i] : undefined;
+              return (
+                <li key={i} className="step">
+                  <span className="step-number">{i + 1}</span>
+                  <button
+                    type="button"
+                    className="step-select"
+                    ref={(element) => {
+                      cardButtons.current[i] = element;
+                    }}
+                    aria-pressed={open && i === selected}
+                    onClick={() => chooseChord(i)}
+                  >
+                    {symbol}
+                  </button>
+                  {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
+                  {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
+                  <button
+                    type="button"
+                    className="step-remove"
+                    aria-label={`${i + 1}番目のコードを削除`}
+                    disabled={chords.length <= 1}
+                    onClick={() => removeChord(i)}
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+            <li className="step-add">
+              <button type="button" disabled={chords.length >= MAX_PROGRESSION_CHORDS} onClick={addChord}>
+                ＋ コードを追加
+              </button>
+            </li>
+          </ul>
+        </section>
+      </div>
+    </div>
   );
 }
