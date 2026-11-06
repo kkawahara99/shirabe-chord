@@ -1,4 +1,4 @@
-import { voicingFeatures, type Voicing } from "@shirabe-chord/core";
+import { rootStrings, voicingFeatures, type Voicing } from "@shirabe-chord/core";
 
 /** 図に描くフレットの数。 */
 const FRET_COLUMNS = 5;
@@ -11,6 +11,11 @@ const TOP = 14;
 const STRING_GAP = 16;
 const MARK_X = 22;
 const DOT_RADIUS = 6;
+/** ルートの印の寸法。角を少し丸めた四角（押さえる丸よりわずかに小さい）、セーハの中に重ねる小さな四角、開放の内側の丸。 */
+const ROOT_SQUARE = DOT_RADIUS * 2 - 1;
+const ROOT_OVERLAY = 7;
+const OPEN_RADIUS = 5;
+const ROOT_RING_RADIUS = 2;
 const WIDTH = NUT_X + FRET_GAP * FRET_COLUMNS + 8;
 const STRINGS_BOTTOM = TOP + STRING_GAP * (STRING_COUNT - 1);
 const NUMBER_Y = STRINGS_BOTTOM + 16;
@@ -41,6 +46,8 @@ const INLAYS: Record<number, [number, number][]> = {
 const pressedFrets = (voicing: Voicing) =>
   voicing.filter((fret): fret is number => fret !== null && fret > 0);
 
+const lowestOf = (voicing: Voicing) => Math.min(...pressedFrets(voicing));
+
 /** 図の左端のフレット。押さえる最大が 5 以下なら 1、それ以外は押さえる最小。押さえるフレットが無ければ 1。 */
 export function startFretOf(voicing: Voicing): number {
   const pressed = pressedFrets(voicing);
@@ -58,7 +65,7 @@ export function voicingLabel(symbol: string, voicing: Voicing): string {
 /** セーハの縦棒の範囲。成り立たないときは undefined。 */
 function barreOf(voicing: Voicing, startFret: number) {
   if (!voicingFeatures(voicing).hasBarre) return undefined;
-  const lowest = Math.min(...pressedFrets(voicing));
+  const lowest = lowestOf(voicing);
   const indices = voicing.flatMap((fret, i) => (fret === lowest ? [i] : []));
   return { from: indices[0]!, to: indices[indices.length - 1]!, cell: lowest - startFret + 1 };
 }
@@ -75,6 +82,7 @@ export function VoicingDiagram({
 }) {
   const startFret = startFretOf(voicing);
   const barre = barreOf(voicing, startFret);
+  const rootSet = new Set(rootStrings(symbol, voicing));
   const cells = Array.from({ length: FRET_COLUMNS }, (_, k) => k + 1);
 
   return (
@@ -174,17 +182,54 @@ export function VoicingDiagram({
               />
             );
           }
+          const isRoot = rootSet.has(string);
+          const rootAttr = isRoot ? { "data-root": "true" } : {};
           if (fret === 0) {
-            return <circle key={i} data-mark="open" data-string={string} cx={MARK_X} cy={y} r={5} />;
+            return (
+              <g key={i}>
+                <circle data-mark="open" data-string={string} {...rootAttr} cx={MARK_X} cy={y} r={OPEN_RADIUS} />
+                {isRoot && (
+                  <circle
+                    data-mark="root-ring"
+                    data-string={string}
+                    aria-hidden="true"
+                    cx={MARK_X}
+                    cy={y}
+                    r={ROOT_RING_RADIUS}
+                  />
+                )}
+              </g>
+            );
           }
           const cell = fret - startFret + 1;
+          const x = cellX(cell);
+          // 棒の外のルートは丸を四角に置き換える。棒の中は丸を残し、上に小さな四角を重ねる（下の overlay）。
+          if (isRoot && !(barre && fret === lowestOf(voicing))) {
+            return (
+              <rect
+                key={i}
+                data-mark="dot"
+                data-string={string}
+                data-cell={cell}
+                {...rootAttr}
+                x={x - ROOT_SQUARE / 2}
+                y={y - ROOT_SQUARE / 2}
+                width={ROOT_SQUARE}
+                height={ROOT_SQUARE}
+                rx={2}
+                fill="currentColor"
+                stroke="none"
+              />
+            );
+          }
           return (
             <circle
               key={i}
               data-mark="dot"
               data-string={string}
               data-cell={cell}
-              cx={cellX(cell)}
+              {...rootAttr}
+              cx={x}
               cy={y}
               r={DOT_RADIUS}
               fill="currentColor"
@@ -192,6 +237,28 @@ export function VoicingDiagram({
             />
           );
         })}
+        {/* セーハの棒の中のルート。背景色の縁取りで棒と区別する。棒と丸より後に描く。 */}
+        {barre &&
+          voicing.flatMap((fret, i) => {
+            const string = stringNumber(i);
+            if (fret !== lowestOf(voicing) || !rootSet.has(string)) return [];
+            return (
+              <rect
+                key={`overlay-${i}`}
+                data-mark="root-overlay"
+                data-string={string}
+                aria-hidden="true"
+                x={cellX(barre.cell) - ROOT_OVERLAY / 2}
+                y={stringY(string) - ROOT_OVERLAY / 2}
+                width={ROOT_OVERLAY}
+                height={ROOT_OVERLAY}
+                rx={1.5}
+                fill="currentColor"
+                strokeWidth={1.5}
+                style={{ stroke: "var(--surface)" }}
+              />
+            );
+          })}
       </svg>
     </figure>
   );

@@ -4,6 +4,7 @@ import type { ParsedChord } from "./chord.ts";
 import { chord, v } from "./test-helpers.ts";
 import {
   generateVoicings,
+  rootStrings,
   validateVoicing,
   voicingFeatures,
   type Voicing,
@@ -355,5 +356,47 @@ describe("voicingFeatures", () => {
     const features = voicingFeatures(v("13321x"));
     expect(features.hasBarre).toBe(true);
     expect(features.fingers).toBe(4);
+  });
+});
+
+describe("rootStrings（ルート音を鳴らす弦）", () => {
+  it("ルート音の弦の番号（1〜6、1弦が高音）を昇順で返す", () => {
+    expect(rootStrings("C", v("x32010"))).toEqual([2, 5]);
+    expect(rootStrings("E", v("022100"))).toEqual([1, 4, 6]);
+    expect(rootStrings("F", v("133211"))).toEqual([1, 4, 6]);
+  });
+
+  it("オンコードでも、印はルート音の弦で、ベース音の弦ではない", () => {
+    expect(rootStrings("C/E", v("032010"))).toEqual([2, 5]);
+  });
+
+  it("鳴らさない弦は含めない", () => {
+    expect(rootStrings("C", v("x3xxx0"))).toEqual([5]);
+    expect(rootStrings("C", v("xxxxxx"))).toEqual([]);
+  });
+
+  it.each(["", "H", "C/", "Cxyz"])("読めない記号 %j は空の配列", (symbol) => {
+    expect(rootStrings(symbol, v("x32010"))).toEqual([]);
+  });
+
+  it("任意のコードの全候補で、戻り値は 1〜6 の昇順・重複なしで、各弦の音がルートと一致する", () => {
+    const symbols = ["C", "Am7", "F", "G7", "Bm7-5", "D/F#", "E7(#9,b13)", "Bb", "F#m"];
+    for (const symbol of symbols) {
+      const parsed = chord(symbol);
+      for (const voicing of generateVoicings(parsed)) {
+        const strings = rootStrings(symbol, voicing);
+        expect(strings).toEqual([...new Set(strings)].sort((a, b) => a - b));
+        const expected = voicing.flatMap((fret, i) =>
+          fret !== null && ([40, 45, 50, 55, 59, 64][i]! + fret) % 12 === parsed.root ? [6 - i] : [],
+        );
+        expect(strings).toEqual(expected.sort((a, b) => a - b));
+        for (const string of strings) {
+          const fret = voicing[6 - string];
+          expect(fret).not.toBeNull();
+          const pitch = [40, 45, 50, 55, 59, 64][6 - string]! + fret!;
+          expect(pitch % 12).toBe(parsed.root);
+        }
+      }
+    }
   });
 });
