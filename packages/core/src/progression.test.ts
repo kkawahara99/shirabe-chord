@@ -202,6 +202,46 @@ describe("optimizeProgression: 代表の進行", () => {
   });
 });
 
+describe("optimizeProgression: 窮屈な形と薄い形は選ばれにくい", () => {
+  it("Bb Eb F Bb は、Bb が G 形のセーハ、Eb が C 形になる", () => {
+    expect(picked("Bb Eb F Bb")).toEqual(["653336", "x65343", "133211", "x13331"]);
+  });
+
+  it("Fm7 Bb7 EbM7 AbM7 に x10331・x10131・xx10x3 は含まれず、Bb7 は x13131", () => {
+    const steps = picked("Fm7 Bb7 EbM7 AbM7");
+    for (const avoided of ["x10331", "x10131", "xx10x3"]) expect(steps).not.toContain(avoided);
+    expect(steps[1]).toBe("x13131");
+  });
+
+  it("標準形の進行は変わらない", () => {
+    expect(picked("C Am F G7")).toEqual(["x32010", "x02210", "133211", "320001"]);
+    expect(picked("Dm7 G7 CM7")).toEqual(["xx0211", "320001", "x32000"]);
+    expect(picked("E A B7 E")).toEqual(["022100", "x02220", "x21202", "022100"]);
+    expect(picked("F#m7 B7 EM7 C#7")).toEqual(["242222", "x21202", "021100", "x43101"]);
+  });
+
+  it("A7 の単体は、指 2 本の x02020（窮屈な形の対象外）", () => {
+    expect(picked("A7")).toEqual(["x02020"]);
+  });
+
+  // [コード, 変更前, 変更後]。変更前はどれも窮屈な形（理由は docs/adr/0026）。
+  it.each<[string, string, string]>([
+    ["FM7", "102210", "10x210"],
+    ["F6", "100211", "100x11"],
+    ["Fadd9", "103011", "10x011"],
+    ["Fdim", "12x101", "1231x1"],
+    ["Fdim7", "120101", "1x0101"],
+    ["Faug", "10x221", "10322x"],
+    ["Fsus2", "1x3011", "1330x3"],
+    ["F7(#11)", "101201", "121211"],
+    ["F#aug", "2x0332", "210x32"],
+    ["Abm7-5", "420402", "420102"],
+    ["D/F#", "200232", "2002x2"],
+  ])("単体の %s は、窮屈な形の %s をやめて %s になる", (symbol, _before, after) => {
+    expect(picked(symbol)).toEqual([after]);
+  });
+});
+
 describe("optimizeSymbols: 記号の配列から選ぶ", () => {
   it("空の配列は empty", () => {
     expect(optimizeSymbols([])).toEqual({ ok: false, reason: "empty" });
