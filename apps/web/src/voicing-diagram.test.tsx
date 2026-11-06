@@ -1,4 +1,4 @@
-import { generateVoicings, parseChord, voicingFeatures, type Voicing } from "@shirabe-chord/core";
+import { generateVoicings, parseChord, rootStrings, voicingFeatures, type Voicing } from "@shirabe-chord/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { startFretOf, VoicingDiagram, voicingLabel } from "./voicing-diagram.tsx";
@@ -11,6 +11,13 @@ const marks = (container: HTMLElement, mark: string) =>
   Array.from(container.querySelectorAll<SVGElement>(`[data-mark="${mark}"]`));
 
 const num = (el: Element, attr: string) => Number(el.getAttribute(attr));
+/** 丸は cx・cy、ルートの四角は x・y・width・height から中心を出す。 */
+const center = (el: Element) =>
+  el.tagName === "rect"
+    ? { x: num(el, "x") + num(el, "width") / 2, y: num(el, "y") + num(el, "height") / 2 }
+    : { x: num(el, "cx"), y: num(el, "cy") };
+const roots = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<SVGElement>('[data-root="true"]'));
 const fretNumbers = (container: HTMLElement) => marks(container, "fret-number").map((m) => m.textContent);
 
 describe("startFretOf（開始フレット）", () => {
@@ -54,10 +61,10 @@ describe("VoicingDiagram（押さえ方の図）", () => {
       ["2", "1"],
     ]);
     const [d5, d4, d2] = dots;
-    expect(num(d2!, "cy")).toBeLessThan(num(d4!, "cy")); // 2弦のほうが上
-    expect(num(d4!, "cy")).toBeLessThan(num(d5!, "cy"));
-    expect(num(d2!, "cx")).toBeLessThan(num(d4!, "cx")); // 1フレットのほうが左
-    expect(num(d4!, "cx")).toBeLessThan(num(d5!, "cx"));
+    expect(center(d2!).y).toBeLessThan(center(d4!).y); // 2弦のほうが上
+    expect(center(d4!).y).toBeLessThan(center(d5!).y);
+    expect(center(d2!).x).toBeLessThan(center(d4!).x); // 1フレットのほうが左
+    expect(center(d4!).x).toBeLessThan(center(d5!).x);
     expect(marks(container, "mute")[0]!.dataset.string).toBe("6");
   });
 
@@ -85,7 +92,7 @@ describe("VoicingDiagram（押さえ方の図）", () => {
     const nut = marks(container, "nut");
     expect(nut).toHaveLength(1);
     const nutX = num(nut[0]!, "x1");
-    for (const dot of marks(container, "dot")) expect(num(dot, "cx")).toBeGreaterThan(nutX);
+    for (const dot of marks(container, "dot")) expect(center(dot).x).toBeGreaterThan(nutX);
     for (const open of marks(container, "open")) expect(num(open, "cx")).toBeLessThan(nutX);
     const mute = marks(container, "mute")[0]!;
     expect(Number(mute.dataset.x)).toBeLessThan(nutX);
@@ -182,10 +189,71 @@ describe("VoicingDiagram（押さえ方の図）", () => {
           expect(cell).toBeLessThanOrEqual(5);
         }
         expect(marks(container, "barre")).toHaveLength(voicingFeatures(voicing).hasBarre ? 1 : 0);
+        expect(roots(container).map((m) => Number(m.dataset.string))).toEqual(
+          rootStrings(symbol, voicing).reverse(),
+        );
         unmount();
       }
     },
   );
+});
+
+describe("VoicingDiagram のルート音の印", () => {
+  const E: Voicing = [0, 2, 2, 1, 0, 0];
+
+  it("C x32010: ルート音の弦（5弦3フレット・2弦1フレット）だけに印が付き、四角になる", () => {
+    const { container } = render(<VoicingDiagram symbol="C" voicing={C} />);
+    expect(roots(container).map((m) => [m.tagName, m.dataset.mark, m.dataset.string])).toEqual([
+      ["rect", "dot", "5"],
+      ["rect", "dot", "2"],
+    ]);
+    const plain = marks(container, "dot").filter((m) => m.tagName === "circle");
+    expect(plain.map((m) => m.dataset.string)).toEqual(["4"]);
+    expect(marks(container, "open")).toHaveLength(2); // 開放弦（3弦・1弦）はルートではない
+    expect(marks(container, "root-ring")).toHaveLength(0);
+  });
+
+  it("E 022100: 6弦開放と1弦開放のルートは二重の丸、4弦2フレットは四角。ほかの開放弦は二重にならない", () => {
+    const { container } = render(<VoicingDiagram symbol="E" voicing={E} />);
+    expect(roots(container).map((m) => [m.dataset.mark, m.dataset.string])).toEqual([
+      ["open", "6"],
+      ["dot", "4"],
+      ["open", "1"],
+    ]);
+    const inner = marks(container, "root-ring");
+    expect(inner.map((m) => m.dataset.string)).toEqual(["6", "1"]);
+    expect(marks(container, "open")).toHaveLength(3);
+  });
+
+  it("F 133211: セーハの棒の中のルート（6弦・1弦）は丸を残して小さな四角を重ね、棒の外のルート（4弦3フレット）は丸が四角になる", () => {
+    const { container } = render(<VoicingDiagram symbol="F" voicing={F} />);
+    expect(roots(container).map((m) => [m.tagName, m.dataset.mark, m.dataset.string])).toEqual([
+      ["circle", "dot", "6"],
+      ["rect", "dot", "4"],
+      ["circle", "dot", "1"],
+    ]);
+    const overlays = marks(container, "root-overlay");
+    expect(overlays.map((m) => m.dataset.string)).toEqual(["6", "1"]);
+    for (const overlay of overlays) {
+      expect(overlay.tagName).toBe("rect");
+      const dot = marks(container, "dot").find((d) => d.dataset.string === overlay.dataset.string)!;
+      expect(center(overlay)).toEqual(center(dot));
+      expect(overlay.getAttribute("style")).toContain("var(--surface)");
+      expect(num(overlay, "width")).toBeLessThan(num(dot, "r") * 2);
+    }
+    // 重ねる四角は棒と丸より後に描く。
+    const all = Array.from(container.querySelectorAll("[data-mark]"));
+    expect(Math.min(...overlays.map((o) => all.indexOf(o)))).toBeGreaterThan(
+      Math.max(...marks(container, "dot").map((d) => all.indexOf(d)), all.indexOf(marks(container, "barre")[0]!)),
+    );
+  });
+
+  it("ルートの印を足しても、dot・open・barre の数と読み上げラベルは変わらない", () => {
+    const { container } = render(<VoicingDiagram symbol="F" voicing={F} />);
+    expect(marks(container, "dot")).toHaveLength(6);
+    expect(marks(container, "barre")).toHaveLength(1);
+    expect(screen.getByRole("img").getAttribute("aria-label")).toBe("F: 133211");
+  });
 });
 
 describe("VoicingDiagram の見出し", () => {

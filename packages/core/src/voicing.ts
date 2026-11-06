@@ -1,4 +1,4 @@
-import type { ParsedChord } from "./chord.ts";
+import { parseChord, type ParsedChord } from "./chord.ts";
 import { transpose, type PitchClass } from "./pitch-class.ts";
 
 /** 1 本の弦の状態。フレット番号（0 は開放）か、鳴らさない（null）。 */
@@ -109,6 +109,18 @@ export function voicingFeatures(voicing: Voicing): VoicingFeatures {
 export function lowestPressedFret(voicing: Voicing): number | undefined {
   const pressed = voicing.filter((fret): fret is number => fret !== null && fret > 0);
   return pressed.length === 0 ? undefined : Math.min(...pressed);
+}
+
+/**
+ * ルート音を鳴らす弦の番号（1〜6、1弦が高音）を昇順で返す。読めない記号は空の配列。
+ * オンコードでも、対象はルート音（ベース音ではない）。形は検査しない。
+ */
+export function rootStrings(symbol: string, voicing: Voicing): number[] {
+  const parsed = parseChord(symbol);
+  if (!parsed.ok) return [];
+  return voicing.flatMap((fret, string) =>
+    fret !== null && pitchClassOf(string, fret) === parsed.root ? [STRING_COUNT - string] : [],
+  ).reverse();
 }
 
 const fail = (reason: VoicingFailure): ValidateVoicingResult => ({ ok: false, reason });
