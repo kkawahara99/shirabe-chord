@@ -268,6 +268,12 @@ describe("optimizeSymbols: 最初の押さえ方の指定（firstVoicing）", ()
     expect(result.steps).toHaveLength(4);
   });
 
+  it("x35553 を指定した C Am F G の Am は、開放弦を使わない 577555 になる（高い位置の開放弦は不利。変更前は x0x555）", () => {
+    const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: v("x35553") }));
+    expect(show(result.steps[0]!.voicing)).toBe("x35553");
+    expect(show(result.steps[1]!.voicing)).toBe("577555");
+  });
+
   it("最低フレット 5 の C を指定すると、続くコードは開放に戻らず 5〜9 フレットの窓に収まる", () => {
     const first = shapesWithLowestFret("C", 5)[0]!;
     const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: first }));
