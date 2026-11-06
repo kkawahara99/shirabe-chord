@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_COST_WEIGHTS, transitionCost, voicingCost, type CostWeights } from "./cost.ts";
 import { v } from "./test-helpers.ts";
+import { voicingFeatures } from "./voicing.ts";
 
 /** 指定した項目だけ重み 1、ほかは 0。 */
 function only(item: keyof CostWeights, weight = 1): CostWeights {
@@ -13,6 +14,8 @@ function only(item: keyof CostWeights, weight = 1): CostWeights {
     openStrings: 0,
     openStringsHighPosition: 0,
     mutedStrings: 0,
+    crampedShape: 0,
+    missingSoundingStrings: 0,
     fretShift: 0,
     changedStrings: 0,
     [item]: weight,
@@ -85,6 +88,83 @@ describe("voicingCost: 開放弦の項は、押さえる最高フレットで値
             ? { ...DEFAULT_COST_WEIGHTS, openStrings: weight }
             : { ...DEFAULT_COST_WEIGHTS, openStringsHighPosition: weight };
         expect(voicingCost(shape, changed)).toBeCloseTo(voicingCost(shape), 10);
+      }),
+    );
+  });
+});
+
+describe("voicingCost: 窮屈な形の項（開放弦をはさんで同じフレットを別の指で押さえ、指 4 本）", () => {
+  // 条件は 3 つ全て: 最も低いフレットを押さえる弦が 2 本以上／その弦の間に開放弦と、より高いフレットを押さえる弦の両方／指が 4 本。
+  it.each<[string, string, number]>([
+    ["x10331 は条件を全て満たす", "x10331", 1],
+    ["x10131 は条件を全て満たす", "x10131", 1],
+    ["x21202 は最低フレットを押さえる弦が 1 本なので対象外", "x21202", 0],
+    ["x43101 は弦の間が開放弦だけ（より高いフレットの弦が無い）なので対象外", "x43101", 0],
+    ["x02020 は指が 2 本なので対象外", "x02020", 0],
+    ["x13331 はセーハ（開放弦が間に無い）なので対象外", "x13331", 0],
+    ["x32010 は最低フレットを押さえる弦が 1 本なので対象外", "x32010", 0],
+  ])("%s", (_name, text, expected) => {
+    expect(voicingCost(v(text), only("crampedShape"))).toBe(expected);
+  });
+
+  it("既定の重みでは、窮屈な形は標準のセーハ形より高い", () => {
+    expect(voicingCost(v("x10331"))).toBeGreaterThan(voicingCost(v("x13331")));
+    expect(voicingCost(v("x10131"))).toBeGreaterThan(voicingCost(v("x13131")));
+  });
+
+  // 低いフレット（0〜3）に絞ると、窮屈な形が十分な割合で生まれる。
+  const lowFrets = fc.array(fc.option(fc.integer({ min: 0, max: 3 }), { nil: null }), {
+    minLength: 6,
+    maxLength: 6,
+  });
+
+  /** 実装と別に、3 条件を文面どおりに書いた判定。 */
+  function isCrampedByDefinition(shape: readonly (number | null)[]): boolean {
+    const pressed = shape.filter((fret): fret is number => fret !== null && fret > 0);
+    if (pressed.length === 0) return false;
+    const lowest = Math.min(...pressed);
+    const first = shape.indexOf(lowest);
+    const between = shape.slice(first, shape.lastIndexOf(lowest) + 1);
+    return (
+      between.filter((fret) => fret === lowest).length >= 2 &&
+      between.includes(0) &&
+      between.some((fret) => fret !== null && fret > lowest) &&
+      voicingFeatures(shape).fingers === 4
+    );
+  }
+
+  it("加算が付くのは、3 つの条件を全て満たす形だけ（性質）", () => {
+    fc.assert(
+      fc.property(lowFrets, (shape) => {
+        expect(voicingCost(shape, only("crampedShape"))).toBe(isCrampedByDefinition(shape) ? 1 : 0);
+      }),
+      { numRuns: 2000 },
+    );
+  });
+});
+
+describe("voicingCost: 鳴る弦が少ない形の項（4 本に足りない 1 本ごと）", () => {
+  it.each<[string, string, number]>([
+    ["鳴る弦が 3 本（xx10x3）は 1", "xx10x3", 1],
+    ["鳴る弦が 4 本（xx0211）は 0", "xx0211", 0],
+    ["鳴る弦が 5 本（x32010）は 0", "x32010", 0],
+    ["ミュートが 4 本（鳴る弦 2 本）は 2", "xxx0x1", 2],
+  ])("%s", (_name, text, expected) => {
+    expect(voicingCost(v(text), only("missingSoundingStrings"))).toBe(expected);
+  });
+
+  it("既定の重みでは、鳴る弦が 3 本の xx10x3 は x68886 より高い", () => {
+    expect(voicingCost(v("xx10x3"))).toBeGreaterThan(voicingCost(v("x68886")));
+  });
+
+  it("鳴る弦が 4 本以上の形は、この重みを変えてもコストが変わらない（性質）", () => {
+    const shape = fc
+      .array(fc.option(fc.integer({ min: 0, max: 15 }), { nil: null }), { minLength: 6, maxLength: 6 })
+      .filter((s) => s.filter((fret) => fret !== null).length >= 4);
+    fc.assert(
+      fc.property(shape, fc.double({ min: 0, max: 5, noNaN: true }), (s, weight) => {
+        const changed = { ...DEFAULT_COST_WEIGHTS, missingSoundingStrings: weight };
+        expect(voicingCost(s, changed)).toBeCloseTo(voicingCost(s), 10);
       }),
     );
   });
