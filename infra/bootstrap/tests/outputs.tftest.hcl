@@ -1,5 +1,9 @@
 # 出力（本体の backend に写す値）を確かめる。
 
+variables {
+  github_repository = "example-owner/example-repo"
+}
+
 mock_provider "aws" {
   override_data {
     target          = data.aws_caller_identity.current
@@ -47,5 +51,29 @@ run "outputs_backendの例にbucket_key_region_use_lockfileが入る" {
   assert {
     condition     = strcontains(output.backend_config_example, "use_lockfile = true")
     error_message = "backend の例に use_lockfile = true が入っていない"
+  }
+}
+
+# ARN は apply まで決まらないので command = apply にする
+run "outputs_ロールのARNの出力が実際のロールと一致" {
+  command = apply
+
+  assert {
+    condition     = output.deploy_role_arn == aws_iam_role.deploy.arn
+    error_message = "deploy_role_arn の出力がデプロイ用ロールの ARN と違う"
+  }
+
+  assert {
+    condition     = output.plan_role_arn == aws_iam_role.plan.arn
+    error_message = "plan_role_arn の出力が PR 用ロールの ARN と違う"
+  }
+}
+
+run "outputs_ロールのARNの出力はsensitive" {
+  command = plan
+
+  assert {
+    condition     = issensitive(output.deploy_role_arn) && issensitive(output.plan_role_arn)
+    error_message = "ロールの ARN（アカウントIDを含む）の出力が sensitive でない"
   }
 }

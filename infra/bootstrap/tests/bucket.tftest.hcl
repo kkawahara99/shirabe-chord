@@ -2,6 +2,10 @@
 # アカウントID・リージョンはデータソースで引くため、override_data で架空の値を入れる。`aws_region` は `region` 属性を使う。
 # プロバイダ側の設定の検証（`bucket_namespace` と名前の接尾辞の整合など）はモックでは走らず、実際の plan で初めて分かる。
 
+variables {
+  github_repository = "example-owner/example-repo"
+}
+
 mock_provider "aws" {
   override_data {
     target          = data.aws_caller_identity.current
