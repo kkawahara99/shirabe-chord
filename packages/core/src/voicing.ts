@@ -21,11 +21,13 @@ export type ValidateVoicingResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: VoicingFailure };
 
-/** 最適化で使う特徴。押さえるフレット（開放を除く）が無いとき、`span` と `averageFret` は 0。 */
+/** 最適化で使う特徴。押さえるフレット（開放を除く）が無いとき、`span`・`highestFret`・`averageFret` は 0。 */
 export type VoicingFeatures = {
   readonly fingers: number;
   readonly hasBarre: boolean;
   readonly span: number;
+  /** 押さえるフレットの最大値。 */
+  readonly highestFret: number;
   readonly averageFret: number;
   readonly openStrings: number;
 };
@@ -79,7 +81,7 @@ export function voicingFeatures(voicing: Voicing): VoicingFeatures {
   const pressed = voicing.filter((fret): fret is number => fret !== null && fret > 0);
   const openStrings = voicing.filter((fret) => fret === 0).length;
   if (pressed.length === 0) {
-    return { fingers: 0, hasBarre: false, span: 0, averageFret: 0, openStrings };
+    return { fingers: 0, hasBarre: false, span: 0, highestFret: 0, averageFret: 0, openStrings };
   }
 
   const lowest = Math.min(...pressed);
@@ -94,6 +96,7 @@ export function voicingFeatures(voicing: Voicing): VoicingFeatures {
     fingers,
     hasBarre,
     span: highest - lowest,
+    highestFret: highest,
     averageFret: pressed.reduce((sum, fret) => sum + fret, 0) / pressed.length,
     openStrings,
   };

@@ -300,31 +300,34 @@ describe("generateVoicings", () => {
 });
 
 describe("voicingFeatures", () => {
-  it("C の x32010 は、3 本・セーハ無・幅 2・平均 2・開放 2", () => {
+  it("C の x32010 は、3 本・セーハ無・幅 2・最高フレット 3・平均 2・開放 2", () => {
     expect(voicingFeatures(v("x32010"))).toEqual({
       fingers: 3,
       hasBarre: false,
       span: 2,
+      highestFret: 3,
       averageFret: 2,
       openStrings: 2,
     });
   });
 
-  it("F の 133211 は、4 本・セーハ有・幅 2・平均 11/6・開放 0", () => {
+  it("F の 133211 は、4 本・セーハ有・幅 2・最高フレット 3・平均 11/6・開放 0", () => {
     expect(voicingFeatures(v("133211"))).toEqual({
       fingers: 4,
       hasBarre: true,
       span: 2,
+      highestFret: 3,
       averageFret: 11 / 6,
       openStrings: 0,
     });
   });
 
-  it("押さえるフレットが無い 000000 は、0 本・セーハ無・幅 0・平均 0・開放 6", () => {
+  it("押さえるフレットが無い 000000 は、0 本・セーハ無・幅 0・最高フレット 0・平均 0・開放 6", () => {
     expect(voicingFeatures(v("000000"))).toEqual({
       fingers: 0,
       hasBarre: false,
       span: 0,
+      highestFret: 0,
       averageFret: 0,
       openStrings: 6,
     });

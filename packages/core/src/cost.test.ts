@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { transitionCost, voicingCost, type CostWeights } from "./cost.ts";
+import { DEFAULT_COST_WEIGHTS, transitionCost, voicingCost, type CostWeights } from "./cost.ts";
 import { v } from "./test-helpers.ts";
 
 /** 指定した項目だけ重み 1、ほかは 0。 */
@@ -11,6 +11,7 @@ function only(item: keyof CostWeights, weight = 1): CostWeights {
     span: 0,
     averageFret: 0,
     openStrings: 0,
+    openStringsHighPosition: 0,
     mutedStrings: 0,
     fretShift: 0,
     changedStrings: 0,
@@ -47,6 +48,45 @@ describe("voicingCost: 単体のコスト", () => {
   it("ミュートした弦が多いほど高い（既定の重み）", () => {
     // 同じ形から 6弦の開放を消すと、ミュートが 1 本増え開放弦が 1 本減る。
     expect(voicingCost(v("x22000"))).toBeGreaterThan(voicingCost(v("022000")));
+  });
+});
+
+describe("voicingCost: 開放弦の項は、押さえる最高フレットで値引きと加算に分かれる", () => {
+  // 4 以下（OPEN_POSITION_MAX_FRET）: 開放弦 1 本につき値引き。5 以上: 1 本につき加算。
+  it.each<[string, string, number, number]>([
+    // [説明, 押さえ方, openStrings だけ 1 のコスト, openStringsHighPosition だけ 1 のコスト]
+    ["最高フレット 3（x32010）", "x32010", -2, 0],
+    ["最高フレットがちょうど 4 で開放弦を含む", "x04000", -4, 0],
+    ["最高フレットがちょうど 5 で開放弦を含む", "x05000", 0, 4],
+    ["最高フレット 10 で開放弦を含む（8 7 10 0 8 0）", "8 7 10 0 8 0", 0, 2],
+    ["押さえるフレットが無い（0x0000）は値引き側", "0x0000", -5, 0],
+    ["最高フレット 5 以上でも開放弦が無ければどちらも 0", "133211", 0, 0],
+  ])("%s", (_name, text, discount, surcharge) => {
+    expect(voicingCost(v(text), only("openStrings"))).toBeCloseTo(discount, 10);
+    expect(voicingCost(v(text), only("openStringsHighPosition"))).toBeCloseTo(surcharge, 10);
+  });
+
+  it("既定の重みでは、高い位置の開放弦入りより、開放弦を減らした形の方が安い", () => {
+    expect(voicingCost(v("x35553"))).toBeLessThan(voicingCost(v("x35050")));
+    expect(voicingCost(v("8 7 x 0 8 8"))).toBeLessThan(voicingCost(v("8 7 10 0 8 0")));
+  });
+
+  const voicing = fc.array(fc.option(fc.integer({ min: 0, max: 15 }), { nil: null }), {
+    minLength: 6,
+    maxLength: 6,
+  });
+
+  it("最高フレット 5 以上では値引きの重みを、4 以下では高い位置の重みを変えても、コストは変わらない（性質）", () => {
+    fc.assert(
+      fc.property(voicing, fc.double({ min: 0, max: 5, noNaN: true }), (shape, weight) => {
+        const highest = Math.max(0, ...shape.filter((fret): fret is number => fret !== null));
+        const changed: CostWeights =
+          highest >= 5
+            ? { ...DEFAULT_COST_WEIGHTS, openStrings: weight }
+            : { ...DEFAULT_COST_WEIGHTS, openStringsHighPosition: weight };
+        expect(voicingCost(shape, changed)).toBeCloseTo(voicingCost(shape), 10);
+      }),
+    );
   });
 });
 
