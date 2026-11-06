@@ -3,7 +3,7 @@
 Terraform のコード。IaC に Terraform を選んだ理由は [ADR 0002](../docs/adr/0002-iac-tool-terraform.md)、名前の付け方は [ADR 0005](../docs/adr/0005-resource-naming.md)。
 
 - `bootstrap/` … 初回だけ手で適用する準備用のルートモジュール。状態ファイル用の S3 バケットを作る。[手順](bootstrap/README.md)
-- 本体のルートモジュールは `app/` に置く（後続の Issue で作る）。
+- `app/` … 本体のルートモジュール。ビルドした静的サイト（`apps/web/dist`）を置く非公開の S3 バケットと、配信する CloudFront。独自ドメインは変数 `domain_names`・`acm_certificate_arn` で切り替える。理由は [ADR 0023](../docs/adr/0023-static-site-delivery-with-cloudfront-and-s3.md)。
 
 ## 後続のコードが従う置き方
 
