@@ -15,6 +15,17 @@ locals {
 
   # <プロジェクト名>-<環境名>-s3-state-<アカウントID>-<リージョン>-an
   state_bucket_name = "${var.project_name}-${var.environment}-s3-state-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.region}-an"
+
+  # 配信先（infra/app の S3）。名前は本体側と揃える。ロールの権限は、前方一致でなくこの正確な名前に絞る
+  site_bucket_name = "${var.project_name}-${var.environment}-s3-site-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.region}-an"
+
+  # 本体の状態ファイルのキー。backend_config_example と、ロールの権限（github_actions.tf）で共有する
+  app_state_key = "app/terraform.tfstate"
+  app_lock_key  = "${local.app_state_key}.tflock"
+
+  # <プロジェクト名>-<環境名>-iam-<用途>（64 文字以内）
+  deploy_role_name = "${var.project_name}-${var.environment}-iam-deploy"
+  plan_role_name   = "${var.project_name}-${var.environment}-iam-plan"
 }
 
 resource "aws_s3_bucket" "state" {

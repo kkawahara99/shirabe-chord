@@ -1,5 +1,9 @@
 # 入力変数の validation を確かめる。terraform test には性質テストの仕組みが無いため、境界値の点で確かめる。
 
+variables {
+  github_repository = "example-owner/example-repo"
+}
+
 mock_provider "aws" {
   override_data {
     target          = data.aws_caller_identity.current
@@ -178,4 +182,100 @@ run "region_異常_me-central-1は失敗" {
     region = "me-central-1"
   }
   expect_failures = [var.region]
+}
+
+# --- github_repository ---
+
+run "github_repository_正常_owner_repoの形は通る" {
+  command = plan
+  variables {
+    github_repository = "example-owner/example-repo"
+  }
+  assert {
+    condition     = var.github_repository == "example-owner/example-repo"
+    error_message = "example-owner/example-repo の github_repository が通らない"
+  }
+}
+
+run "github_repository_正常_repo名に点_アンダースコア_ハイフンを含んでも通る" {
+  command = plan
+  variables {
+    github_repository = "o-1/my.repo_x-y"
+  }
+  assert {
+    condition     = var.github_repository == "o-1/my.repo_x-y"
+    error_message = "o-1/my.repo_x-y の github_repository が通らない"
+  }
+}
+
+run "github_repository_異常_スラッシュなしは失敗" {
+  command = plan
+  variables {
+    github_repository = "example-repo"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_空は失敗" {
+  command = plan
+  variables {
+    github_repository = ""
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_ownerが空は失敗" {
+  command = plan
+  variables {
+    github_repository = "/repo"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_repoが空は失敗" {
+  command = plan
+  variables {
+    github_repository = "owner/"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_スラッシュが2つは失敗" {
+  command = plan
+  variables {
+    github_repository = "a/b/c"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_ownerにアンダースコアを含むと失敗" {
+  command = plan
+  variables {
+    github_repository = "a_b/c"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_ownerに点を含むと失敗" {
+  command = plan
+  variables {
+    github_repository = "a.b/c"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_アスタリスクを含むと失敗" {
+  command = plan
+  variables {
+    github_repository = "owner/re*po"
+  }
+  expect_failures = [var.github_repository]
+}
+
+run "github_repository_異常_空白を含むと失敗" {
+  command = plan
+  variables {
+    github_repository = "owner/re po"
+  }
+  expect_failures = [var.github_repository]
 }
