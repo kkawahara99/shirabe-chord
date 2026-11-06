@@ -1,6 +1,6 @@
 import { listShapesByLowestFret, optimizeSymbols } from "@shirabe-chord/core";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { App } from "./app.tsx";
 import { voicingLabel } from "./voicing-diagram.tsx";
 
@@ -304,6 +304,44 @@ describe("App（画面全体）", () => {
     expect(resultLabels()).toEqual(expectedLabels(INITIAL, index));
     expect(resultLabels()[0]).toBe(voicingLabel("C", shapes[index]!.voicing));
     expect(resultLabels()).not.toEqual(expectedLabels(INITIAL));
+  });
+
+  describe("同じ最低フレットの図が 2 枚並ぶコード（Bm の 2 フレット: 単体の最安とセーハの最安）", () => {
+    const setUpBm = () => {
+      render(<App />);
+      pick("根音の音名", "B");
+      pick("種類", "m");
+      expect(chordSymbols()[0]).toBe("Bm");
+      const shapes = firstShapes("Bm");
+      const twins = shapes.flatMap((shape, i) => (shape.lowestFret === 2 ? [i] : []));
+      expect(twins).toHaveLength(2); // この前提が崩れたら、例を選び直す
+      return { shapes, first: twins[0]!, second: twins[1]! };
+    };
+
+    it("図がすべて並び、同じ最低フレットが 2 枚あっても key の重複の警告は出ない", () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const { shapes } = setUpBm();
+        expect(cards()).toHaveLength(shapes.length);
+        expect(error).not.toHaveBeenCalled();
+      } finally {
+        error.mockRestore();
+      }
+    });
+
+    it("2 枚目を選ぶと、その押さえ方に固定されて 2 枚目だけが押された状態になり、「おまかせ」で戻せる", () => {
+      const { shapes, first, second } = setUpBm();
+      fireEvent.click(cardButton(second));
+      expect(cardPressed()).toEqual(cards().map((_, i) => (i === second ? "true" : "false")));
+      expect(resultLabels()[0]).toBe(voicingLabel("Bm", shapes[second]!.voicing));
+      expect(resultLabels()).toEqual(expectedLabels(["Bm", "Am", "F", "G7"], second));
+      fireEvent.click(cardButton(first));
+      expect(cardPressed()).toEqual(cards().map((_, i) => (i === first ? "true" : "false")));
+      expect(resultLabels()[0]).toBe(voicingLabel("Bm", shapes[first]!.voicing));
+      fireEvent.click(autoButton());
+      expect(cardPressed().every((pressed) => pressed === "false")).toBe(true);
+      expect(resultLabels()).toEqual(expectedLabels(["Bm", "Am", "F", "G7"]));
+    });
   });
 
   it("選んだあとで「おまかせ」を押すと、おまかせだけが押された状態に戻り、結果も選択なしに戻る", () => {

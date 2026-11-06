@@ -20,6 +20,7 @@ Issueにも既存の決定（[../adr/](../adr/)）にも根拠がなく、Claude
 | 2026-11-04 | #30 | 最初の押さえ方の指定は `options.firstVoicing`（押さえ方の配列）で渡し、`ProgressionStep.inWindow` は指定したときだけ付ける。最低フレットを求める `lowestPressedFret` は `voicing.ts` に置き、`shapes.ts` の同点判定は `cheapest-path.ts` の `TIE_EPSILON` を共有する。窓の下限が 1 で止まる挙動は、外から観測できないので専用のテストを書かなかった（終了は性質テストで確かめた）。`optimizeProgression` にも同じ `options` を通した | Issue が `optimizeSymbols`・`optimizeProgression` の両方に `options` を足すと指定していた。最低フレットは平均フレット（`position`）と取り違えないよう別の名前にした。代替: 同点判定の幅を `shapes.ts` に別に持つ |
 | 2026-11-05 | #38 | 乱数で操作を重ねるテストは、fast-check を web に足さず、種つきの自前の乱数で書いた。見出しを隠す prop は `hideCaption`。利用者の目視での指示で、タブは下線の見た目、「押さえ方」の候補は折り返して縦スクロール（「←」「→」を廃止）、候補はカード全体で選ぶ形（「この押さえ方にする」を廃止）にし、`shape-picker.tsx` と既存テスト（補助関数・テスト名 2 件・「←」「→」のテスト）を変えた。編集パネルは、見出しとタブを固定して中身だけスクロールする | web に依存を足すと 7 日待つ決まり（0015）に当たる。代替: fast-check を足す。候補の変更は Issue の「`shape-picker.tsx` は変えない」と食い違うが、利用者の指示によるもの |
 | 2026-11-06 | #39 | CloudFront の IPv6 を有効（`is_ipv6_enabled`）、キャッシュするメソッドは GET・HEAD のみ、オリジン ID は `site`。`.terraform.lock.hcl` のプロバイダ版は、入れた時点の最新（6.72.0。bootstrap は 6.71.0 のまま）。plan で不明な ID・ARN・ドメイン名は、各テストの `mock_provider` 内の `override_resource` で架空の値に固定した | Issue に指定が無く、費用も変わらない既定的な選び方。ロックは制約の範囲内で、揃える必要は無い。代替: IPv6 を無効にする |
+| 2026-11-06 | #43 | 押さえる最高フレットは `voicingFeatures` の項目 `highestFret` として足した（`voicing.test.ts` の期待値も合わせた）。境目の定数 `OPEN_POSITION_MAX_FRET` は `cost.ts` から出す。画面は変えず、同じ最低フレットの図の見分けは図に任せた（カードの文言は「Nフレット付近」のまま） | Issue が「`voicingFeatures` に無ければ足す」「画面の変更は最小限」と指定していた。代替: カードにセーハの印や文言を足す（デザイン変更はやらないことに入る） |
 
 === M1 モード1をブラウザで動かす 到達ダイジェスト ===
 

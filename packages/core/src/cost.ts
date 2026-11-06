@@ -1,7 +1,7 @@
-import { voicingFeatures, type Voicing } from "./voicing.ts";
+import { voicingFeatures, type Voicing, type VoicingFeatures } from "./voicing.ts";
 
 /**
- * コストの項目ごとの重み。値の意味と初期値の根拠は docs/adr/0018-minimize-voicing-cost-with-dynamic-programming.md。
+ * コストの項目ごとの重み。値の意味と初期値の根拠は docs/adr/0018-minimize-voicing-cost-with-dynamic-programming.md（開放弦の項の分け方と `openStringsHighPosition` は docs/adr/0024-discount-open-strings-only-in-low-positions.md）。
  * 重みは音楽的な判断を含むので、変えると `progression.test.ts` の代表の進行の期待値も変わる。
  */
 export type CostWeights = {
@@ -10,13 +10,18 @@ export type CostWeights = {
   readonly barre: number;
   readonly span: number;
   readonly averageFret: number;
-  /** 開放弦が多いほどコストを下げる（1 本あたりの値引き）。 */
+  /** 低い位置（押さえる最高フレットが `OPEN_POSITION_MAX_FRET` 以下）で、開放弦が多いほどコストを下げる（1 本あたりの値引き）。 */
   readonly openStrings: number;
+  /** 高い位置（押さえる最高フレットが `OPEN_POSITION_MAX_FRET` を超える）で、開放弦が多いほどコストを上げる（1 本あたりの加算）。 */
+  readonly openStringsHighPosition: number;
   readonly mutedStrings: number;
   // 移動（前後の押さえ方）。
   readonly fretShift: number;
   readonly changedStrings: number;
 };
+
+/** 開放弦を値引きする、押さえる最高フレットの上限。これを超えると加算に変わる（docs/adr/0024）。 */
+export const OPEN_POSITION_MAX_FRET = 4;
 
 export const DEFAULT_COST_WEIGHTS: CostWeights = {
   fingers: 1,
@@ -24,6 +29,7 @@ export const DEFAULT_COST_WEIGHTS: CostWeights = {
   span: 0.3,
   averageFret: 0.2,
   openStrings: 0.5,
+  openStringsHighPosition: 2,
   mutedStrings: 2,
   fretShift: 0.6,
   changedStrings: 0.4,
@@ -41,6 +47,16 @@ export type ScoredVoicing = {
   readonly position: number;
 };
 
+/** 開放弦の項。押さえるフレットが無い形は最高フレット 0 なので値引き側。 */
+function openStringsCost(
+  features: Pick<VoicingFeatures, "highestFret" | "openStrings">,
+  weights: CostWeights,
+): number {
+  return features.highestFret <= OPEN_POSITION_MAX_FRET
+    ? -weights.openStrings * features.openStrings
+    : weights.openStringsHighPosition * features.openStrings;
+}
+
 export function scoreVoicing(
   voicing: Voicing,
   weights: CostWeights = DEFAULT_COST_WEIGHTS,
@@ -51,8 +67,8 @@ export function scoreVoicing(
     weights.fingers * features.fingers +
     weights.barre * (features.hasBarre ? 1 : 0) +
     weights.span * features.span +
-    weights.averageFret * features.averageFret -
-    weights.openStrings * features.openStrings +
+    weights.averageFret * features.averageFret +
+    openStringsCost(features, weights) +
     weights.mutedStrings * mutedStrings;
   return {
     voicing,
