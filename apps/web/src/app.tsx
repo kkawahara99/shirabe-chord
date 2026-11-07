@@ -79,7 +79,7 @@ function failureMessages(
     case "too-many-chords":
       return [`コードが多すぎます（${MAX_PROGRESSION_CHORDS}個まで）`];
     case "invalid-pinned-voicing":
-      return ["最初のコードの押さえ方が合っていません"];
+      return ["固定した押さえ方が合っていません"];
     case "invalid-chords":
       return result.chords.map((chord) => describeInvalidChord(chord, played));
   }
@@ -244,8 +244,11 @@ export function App() {
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<EditorTab>("chord");
 
-  /** 最初のコードで選んだ押さえ方。`null` は「おまかせ」。先頭の記号が変わる・先頭が消えるたびに `null` に戻す。 */
-  const [picked, setPicked] = useState<Shape | null>(null);
+  /**
+   * 固定した押さえ方。進行の位置（0 始まり）→ 形。無い位置は「おまかせ」。
+   * 記号が変わった位置は外す・コードを削除したら後ろを 1 つ詰める・カポを変えたらすべて外す（ADR 0033）。
+   */
+  const [pins, setPins] = useState<ReadonlyMap<number, Shape>>(new Map());
 
   /** コピーの結果。進行や手の位置が変わったら消す（古い成功を残さない）。 */
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
@@ -268,18 +271,25 @@ export function App() {
   /** カポ基準の「形の記号」。押さえ方の計算・図・ルートの印は、これで行う。 */
   const shapeSymbols = symbols.map((symbol) => lowerSymbol(symbol, capo));
   const shapeJoined = shapeSymbols.join(" ");
-  const shapes = useMemo(() => listShapesByLowestFret(shapeSymbols[0]!), [shapeSymbols[0]]); // eslint-disable-line react-hooks/exhaustive-deps -- 先頭の記号が同じなら計算し直さない
+  const shapes = useMemo(() => listShapesByLowestFret(shapeSymbols[selected]!), [shapeSymbols[selected]]); // eslint-disable-line react-hooks/exhaustive-deps -- 選んでいるコードの記号が同じなら計算し直さない
+  const firstShapes = useMemo(() => listShapesByLowestFret(shapeSymbols[0]!), [shapeSymbols[0]]); // eslint-disable-line react-hooks/exhaustive-deps -- 先頭の記号が同じなら計算し直さない
   const result = useMemo(
-    () => optimizeSymbols(shapeSymbols, picked ? { pins: new Map([[0, picked.voicing]]) } : undefined),
-    [shapeJoined, picked], // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
+    () => optimizeSymbols(shapeSymbols, { pins: new Map([...pins].map(([position, shape]) => [position, shape.voicing])) }),
+    [shapeJoined, pins], // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
   );
 
-  useEffect(() => setCopyStatus(null), [joined, capo, picked]);
+  /** 手の位置は、固定のうち進行の先頭に最も近いものの最低フレット（コアの窓の基準と同じ）。固定が無ければ `null`（おまかせ）。 */
+  const frontPin = Math.min(...pins.keys());
+  const handPosition = pins.size === 0 ? null : pins.get(frontPin)!.lowestFret;
+  /** 手の位置のボタンで移るコード。固定が無ければ 1 番目。 */
+  const handTarget = pins.size === 0 ? 0 : frontPin;
+
+  useEffect(() => setCopyStatus(null), [joined, capo, pins]);
 
   const copyText = async () => {
     if (!result.ok) return;
     try {
-      await navigator.clipboard.writeText(progressionText(picked?.lowestFret ?? null, result.steps, capo > 0 ? { fret: capo, played: symbols } : undefined));
+      await navigator.clipboard.writeText(progressionText(handPosition, result.steps, capo > 0 ? { fret: capo, played: symbols } : undefined));
       setCopyStatus("copied");
     } catch {
       setCopyStatus("failed"); // クリップボードが無い環境（TypeError）も、書き込みの拒否もここに来る
@@ -287,8 +297,10 @@ export function App() {
   };
 
   const hasShapes = shapes.ok && shapes.shapes.length > 0;
-  /** 「押さえ方」タブは、1 番目のコードを選んでいて、候補があるときだけ出せる。 */
-  const shapeTabAvailable = selected === 0 && hasShapes;
+  /** 手の位置のボタンは、移る先のコードに候補があるときだけ押せる（固定したコードには、必ず候補がある）。 */
+  const handTargetHasShapes = pins.size > 0 || (firstShapes.ok && firstShapes.shapes.length > 0);
+  /** 「押さえ方」タブは、選んでいるコードに候補があるときだけ出せる。 */
+  const shapeTabAvailable = hasShapes;
   const shownTab: EditorTab = tab === "shape" && !shapeTabAvailable ? "chord" : tab;
   const tabs: EditorTab[] = shapeTabAvailable ? ["chord", "extras", "shape"] : ["chord", "extras"];
 
@@ -304,19 +316,28 @@ export function App() {
   };
   const removeChord = (index: number) => {
     setChords(chords.filter((_, i) => i !== index));
-    if (index === 0) setPicked(null);
+    // 削除したコードの固定は消え、後ろの固定は 1 つ前に詰まる（固定は固定したコードに付いたまま動く）。
+    setPins(new Map([...pins].filter(([position]) => position !== index).map(([position, shape]) => [position > index ? position - 1 : position, shape])));
     if (index < selected) setSelected(selected - 1);
     else if (index === selected) {
       setSelected(Math.max(0, index - 1));
       setTab("chord");
     }
   };
+  /** `shape` が `null` なら、その位置を「おまかせ」に戻す。 */
+  const setPin = (position: number, shape: Shape | null) => {
+    if (!shape && !pins.has(position)) return; // 変わらないときは、計算し直さない・コピーの結果の文を消さない
+    const next = new Map(pins);
+    if (shape) next.set(position, shape);
+    else next.delete(position);
+    setPins(next);
+  };
   const changeCapo = (fret: number) => {
     setCapo(fret);
-    setPicked(null); // 選んだ押さえ方は、前のカポの形の記号に対するもの
+    setPins(new Map()); // 固定した押さえ方は、前のカポの形の記号に対するもの
   };
   const changeSelected = (selection: ChordSelection) => {
-    if (selected === 0 && symbolOf(selection) !== symbols[0]) setPicked(null);
+    if (symbolOf(selection) !== symbols[selected]) setPin(selected, null); // 固定した押さえ方は、前の記号に対するもの
     setChords(chords.map((chord, i) => (i === selected ? selection : chord)));
   };
   const closePanel = () => {
@@ -328,7 +349,7 @@ export function App() {
     setOpen(true);
   };
   const showHandPosition = () => {
-    setSelected(0);
+    setSelected(handTarget);
     setTab("shape");
     setOpen(true);
   };
@@ -350,8 +371,8 @@ export function App() {
             ))}
           </select>
         </label>
-        <button type="button" className="hand-button" disabled={!hasShapes} onClick={showHandPosition}>
-          手の位置：{handPositionLabel(picked?.lowestFret ?? null)}
+        <button type="button" className="hand-button" disabled={!handTargetHasShapes} onClick={showHandPosition}>
+          手の位置：{handPositionLabel(handPosition)}
         </button>
         <section aria-label="押さえ方の選び方" className="how">
           <details>
@@ -360,9 +381,9 @@ export function App() {
               <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
               <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
               <li>
-                手の位置を選ぶと、最初のコードの最低フレットから5フレット分に収まる押さえ方から選びます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
+                押さえ方を固定すると、固定したうち最も前のコードの最低フレットから5フレット分に、固定していないコードを収めます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
               </li>
-              <li>位置を選べるのは最初のコードだけです。</li>
+              <li>押さえ方は、どのコードでも選び直せます。</li>
               <li>標準チューニングの右利きのギターを前提にしています。</li>
             </ul>
           </details>
@@ -391,10 +412,10 @@ export function App() {
                 {shownTab === "extras" && <ExtrasTab selection={chords[selected]!} onChange={changeSelected} />}
                 {shownTab === "shape" && shapes.ok && (
                   <ShapePicker
-                    symbol={shapeSymbols[0]!}
+                    symbol={shapeSymbols[selected]!}
                     shapes={shapes.shapes}
-                    pickedIndex={picked?.candidateIndex ?? null}
-                    onPick={setPicked}
+                    pickedIndex={pins.get(selected)?.candidateIndex ?? null}
+                    onPick={(shape) => setPin(selected, shape)}
                   />
                 )}
               </div>
@@ -446,6 +467,7 @@ export function App() {
                   >
                     {displaySymbol(symbol)}
                   </button>
+                  {pins.has(i) && <span className="step-pinned">固定</span>}
                   {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
                   {step && capo > 0 && <p className="step-shape">{displaySymbol(step.symbol)}の形</p>}
                   {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
