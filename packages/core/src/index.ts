@@ -9,7 +9,7 @@ export type {
   NoteSelection,
   Tension,
 } from "./chord-builder.ts";
-export { lowerSymbol } from "./chord-transpose.ts";
+export { CAPO_FRETS, lowerSymbol } from "./chord-transpose.ts";
 export { DEFAULT_COST_WEIGHTS, transitionCost, voicingCost } from "./cost.ts";
 export type { CostWeights } from "./cost.ts";
 export { transpose } from "./pitch-class.ts";
@@ -37,3 +37,17 @@ export type {
 } from "./progression.ts";
 export { listShapesByLowestFret } from "./shapes.ts";
 export type { ListShapesResult, Shape } from "./shapes.ts";
+export {
+  ANONYMOUS_NAME,
+  MAX_DISPLAY_NAME_LENGTH,
+  MAX_NOTE_LENGTH,
+  MAX_SYMBOL_LENGTH,
+  MAX_TITLE_LENGTH,
+  validateSharedScore,
+} from "./shared-score.ts";
+export type {
+  SharedChord,
+  SharedScore,
+  SharedScoreFailure,
+  ValidateSharedScoreResult,
+} from "./shared-score.ts";

@@ -1,5 +1,6 @@
 import {
   buildChordSymbol,
+  CAPO_FRETS,
   CHORD_QUALITIES,
   listShapesByLowestFret,
   lowerSymbol,
@@ -231,8 +232,6 @@ function ExtrasTab(props: { selection: ChordSelection; onChange: (selection: Cho
     </>
   );
 }
-
-const CAPO_FRETS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 
 type EditorTab = "chord" | "extras" | "shape";
 const TAB_LABELS: Record<EditorTab, string> = { chord: "コード", extras: "テンション・ベース", shape: "押さえ方" };

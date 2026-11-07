@@ -1,6 +1,9 @@
 import { parseChord } from "./chord.ts";
 import { transpose, type PitchClass } from "./pitch-class.ts";
 
+/** 選べるカポの位置。0 はカポなし。 */
+export const CAPO_FRETS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
+
 /** 出力の音名。つづりはここで固定する（ADR 0028）。 */
 const SPELLING = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] as const;
 
