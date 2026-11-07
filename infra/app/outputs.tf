@@ -21,7 +21,7 @@ output "distribution_domain_name" {
 # 画面のビルドに渡す値。未設定のあいだは空文字（共有のボタンを出さない）
 output "cognito_domain_url" {
   description = "Cognito のホステッド UI のドメインの URL。画面のビルドに渡す。共有の部品が無いときは空文字。"
-  value       = local.sharing_enabled ? "https://${var.cognito_domain_prefix}.auth.${data.aws_region.current.region}.amazoncognito.com" : ""
+  value       = local.cognito_domain_url
 }
 
 output "cognito_client_id" {

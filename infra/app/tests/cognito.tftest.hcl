@@ -66,6 +66,26 @@ mock_provider "aws" {
       id = "exampleclientid"
     }
   }
+  # 共有の API・配信も一緒に作られるので、plan で不明な値を固定する
+  override_resource {
+    target          = aws_apigatewayv2_api.api
+    override_during = plan
+    values = {
+      api_endpoint  = "https://apiexample.execute-api.ap-northeast-1.amazonaws.com"
+      execution_arn = "arn:aws:execute-api:ap-northeast-1:123456789012:apiexample"
+    }
+  }
+}
+
+# zip の入力（ビルド成果物）が無くても動くよう、差し替える
+mock_provider "archive" {
+  override_data {
+    target          = data.archive_file.api
+    override_during = plan
+    values = {
+      output_base64sha256 = "ZXhhbXBsZQ=="
+    }
+  }
 }
 
 # 設定したときの値。未設定の run は、これを空に戻す

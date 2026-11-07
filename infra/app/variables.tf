@@ -99,3 +99,10 @@ variable "cognito_domain_prefix" {
     error_message = "cognito_domain_prefix に cognito・aws・amazon を含めないでください（Cognito が禁じています）。"
   }
 }
+
+# Lambda に載せるファイル（pnpm --filter api build の成果物）。共有の部品を作るときだけ読む
+variable "api_bundle_path" {
+  type        = string
+  description = "Lambda に載せるビルド済みの 1 ファイル。共有の部品を作る前に pnpm --filter api build で作る。"
+  default     = "../../apps/api/dist/index.mjs"
+}

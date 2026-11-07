@@ -20,8 +20,22 @@ locals {
 
   # AWS 管理のキャッシュポリシー CachingOptimized の固定 ID。data で引くと、デプロイ用ロールにキャッシュポリシーの読み取りが要るため直書きする
   caching_optimized_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  # /api/* 用の AWS 管理ポリシーの固定 ID（同じ理由で直書きする）。CachingDisabled と、Host 以外の閲覧者のヘッダー（Authorization を含む）・クエリ・Cookie をオリジンへ渡す AllViewerExceptHostHeader
+  caching_disabled_policy_id       = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+  all_viewer_except_host_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
   use_custom_domain = length(var.domain_names) > 0
+
+  # 共有を使うときだけ、Turnstile（script-src・frame-src）とログインの通信先の Cognito（connect-src）を足す。ほかは広げない
+  content_security_policy = join("; ", concat(
+    ["default-src 'self'"],
+    local.sharing_enabled ? [
+      "script-src 'self' https://challenges.cloudflare.com",
+      "connect-src 'self' ${local.cognito_domain_url}",
+      "frame-src https://challenges.cloudflare.com",
+    ] : [],
+    ["base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'", "object-src 'none'"],
+  ))
 }
 
 # --- サイト用バケット（非公開。CloudFront の OAC 経由でだけ読める） ---
@@ -167,10 +181,76 @@ resource "aws_cloudfront_response_headers_policy" "site" {
 
     content_security_policy {
       # ビルド成果物は同じオリジンの /assets/*.js・/assets/*.css・/favicon.svg だけを読み込む（確かめた内容は tests/headers.tftest.hcl）
-      content_security_policy = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+      content_security_policy = local.content_security_policy
       override                = true
     }
   }
+}
+
+# /s/* と /api/* 用。既定と同じセキュリティヘッダーに noindex を足したもの（振る舞いに付けられるポリシーは 1 つだけ）。
+# 訪問者が入力した文字を表示するページなので、CSP は外さない。値を既定と合わせることは tests/sharing_cloudfront.tftest.hcl が確かめる
+resource "aws_cloudfront_response_headers_policy" "site_noindex" {
+  count = local.sharing_enabled ? 1 : 0
+
+  name = "${local.cloudfront_site_name}-noindex"
+
+  custom_headers_config {
+    items {
+      header   = "X-Robots-Tag"
+      value    = "noindex"
+      override = true
+    }
+  }
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      include_subdomains         = true
+      preload                    = false
+      override                   = true
+    }
+
+    content_type_options {
+      override = true
+    }
+
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+
+    content_security_policy {
+      content_security_policy = local.content_security_policy
+      override                = true
+    }
+  }
+}
+
+# /s/<ID> と /mine は画面（index.html）を返す。実体の無いパスなので、オリジンに届く前に書き換える。
+# ディストリビューション全体のカスタムエラー応答は使わない（/api の 403・404 まで画面に替わるため）
+resource "aws_cloudfront_function" "spa" {
+  count = local.sharing_enabled ? 1 : 0
+
+  name    = "${local.name_prefix}-cloudfront-spa"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  comment = "/s/<ID> と /mine を index.html に書き換える"
+
+  code = <<-EOT
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      if (uri === '/mine' || uri === '/mine/' || uri.indexOf('/s/') === 0) {
+        request.uri = '/index.html';
+      }
+      return request;
+    }
+  EOT
 }
 
 resource "aws_cloudfront_distribution" "site" {
@@ -187,6 +267,23 @@ resource "aws_cloudfront_distribution" "site" {
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
+  # /api/* の行き先。API Gateway の既定のエンドポイント（https://<id>.execute-api.<region>.amazonaws.com）
+  dynamic "origin" {
+    for_each = local.sharing_enabled ? [1] : []
+
+    content {
+      origin_id   = "api"
+      domain_name = replace(aws_apigatewayv2_api.api[0].api_endpoint, "https://", "")
+
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
+    }
+  }
+
   default_cache_behavior {
     target_origin_id           = "site"
     viewer_protocol_policy     = "redirect-to-https"
@@ -195,6 +292,53 @@ resource "aws_cloudfront_distribution" "site" {
     compress                   = true
     cache_policy_id            = local.caching_optimized_policy_id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.site.id
+
+    # /mine を画面に書き換える（/s/* と同じ Function）
+    dynamic "function_association" {
+      for_each = local.sharing_enabled ? [1] : []
+
+      content {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.spa[0].arn
+      }
+    }
+  }
+
+  # 2 つのパスは重ならないので順序は問わない
+  dynamic "ordered_cache_behavior" {
+    for_each = local.sharing_enabled ? [1] : []
+
+    content {
+      path_pattern               = "/api/*"
+      target_origin_id           = "api"
+      viewer_protocol_policy     = "https-only"
+      allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+      cached_methods             = ["GET", "HEAD"]
+      compress                   = true
+      cache_policy_id            = local.caching_disabled_policy_id
+      origin_request_policy_id   = local.all_viewer_except_host_policy_id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.site_noindex[0].id
+    }
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = local.sharing_enabled ? [1] : []
+
+    content {
+      path_pattern               = "/s/*"
+      target_origin_id           = "site"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["GET", "HEAD"]
+      cached_methods             = ["GET", "HEAD"]
+      compress                   = true
+      cache_policy_id            = local.caching_optimized_policy_id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.site_noindex[0].id
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.spa[0].arn
+      }
+    }
   }
 
   restrictions {
