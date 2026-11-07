@@ -740,7 +740,7 @@ describe("App（配置・編集パネル・開閉）", () => {
   it("ヘッダーにサイト名と説明文があり、手の位置のボタンは「おまかせ」では「手の位置：おまかせ」、選ぶと「手の位置：第Nポジション」になる", () => {
     const { container } = render(<App />);
     const header = container.querySelector("header")!;
-    expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("shirabe-chord");
+    expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("Shirabeコード");
     expect(header.textContent).toContain("コード進行を組み立てると");
     expect(handButton().textContent).toBe("手の位置：おまかせ");
     const shapes = shapesOf("C");

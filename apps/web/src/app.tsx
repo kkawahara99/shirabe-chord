@@ -358,7 +358,7 @@ export function App() {
     <div className="app">
       <header className="site-header">
         <div className="site-title">
-          <h1>shirabe-chord</h1>
+          <h1>Shirabeコード</h1>
           <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
         </div>
         <label className="capo-picker">
