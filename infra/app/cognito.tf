@@ -7,6 +7,9 @@ locals {
 
   cognito_name = "${var.project_name}-${var.environment}-cognito"
 
+  # ホステッド UI のドメインの URL。画面のビルドと CSP（connect-src）に渡す。共有の部品が無いときは空文字
+  cognito_domain_url = local.sharing_enabled ? "https://${var.cognito_domain_prefix}.auth.${data.aws_region.current.region}.amazoncognito.com" : ""
+
   # ログイン後・ログアウト後に戻る先。公開 URL（CloudFront のドメインと独自ドメイン）の /
   cognito_return_urls = [for host in concat([aws_cloudfront_distribution.site.domain_name], var.domain_names) : "https://${host}/"]
 }

@@ -15,5 +15,10 @@ terraform {
       # bucket_namespace（aws_s3_bucket）は 6.37.0 で追加された
       version = ">= 6.37.0, < 7.0"
     }
+    # Lambda のコードを zip にする（sharing.tf）
+    archive = {
+      source  = "hashicorp/archive"
+      version = ">= 2.7.0, < 3.0"
+    }
   }
 }
