@@ -29,7 +29,7 @@ export function ShapePicker(props: {
                 aria-pressed={pickedIndex === shape.candidateIndex}
                 onClick={() => onPick(shape)}
               >
-                {shape.lowestFret}フレット付近
+                第{shape.lowestFret}ポジション
               </button>
               <VoicingDiagram symbol={symbol} voicing={shape.voicing} hideCaption />
             </li>

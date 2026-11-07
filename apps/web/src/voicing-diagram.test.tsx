@@ -39,6 +39,9 @@ describe("voicingLabel（読み上げ用ラベル）", () => {
   it("コード記号と押さえ方を並べ、ミュートは x にする", () => {
     expect(voicingLabel("C", C)).toBe("C: x32010");
   });
+  it("記号の b・# は譜面の表記（♭・♯）で読み上げる", () => {
+    expect(voicingLabel("Bb", C)).toBe("B♭: x32010");
+  });
   it("10 以上のフレットを含むときだけ - で区切る", () => {
     expect(voicingLabel("Bm", [null, 10, 12, 12, 12, 10])).toBe("Bm: x-10-12-12-12-10");
   });
