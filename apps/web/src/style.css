@@ -7,6 +7,23 @@
   --accent: #2b3fd6;
   --accent-bg: #edf0ff;
   --warn: #a8430a;
+  --on-accent: #ffffff;
+}
+
+/* 暗い配色は screen だけ。印刷は変数を戻さなくても白地のまま。 */
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark; /* フォーム部品とスクロールバーを合わせる */
+    --bg: #12141a;
+    --surface: #1c1f27;
+    --text: #e8eaf0;
+    --text-sub: #a3abb8;
+    --line: #343a46;
+    --accent: #8f9dff;
+    --accent-bg: #262c4f;
+    --warn: #f0a066;
+    --on-accent: #12141a;
+  }
 }
 
 * {
@@ -123,7 +140,7 @@ summary:focus-visible {
 
 button[aria-pressed="true"] {
   font-weight: bold;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
