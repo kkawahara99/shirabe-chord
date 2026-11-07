@@ -1,0 +1,113 @@
+# ロールの権限を実環境で確かめる一時ワークフロー（#42）。この PR は main にマージせず、確認後に閉じる。
+# ログは公開されるので値を出さない。AWS の応答はそのまま出さず、結果の種類だけを出す。
+name: tmp-role-check
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ラッパーは標準出力に行を足し、terraform output -raw の値を壊す
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: デプロイ用ロールを引き受けようとする（拒否されるはず）
+        id: assume_deploy
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+          retry-max-attempts: 1
+
+      # 引き受けられてしまったら、デプロイ用の権限で先へ進まないようにここで止める
+      - name: 引き受けの結果を判定する
+        env:
+          OUTCOME: ${{ steps.assume_deploy.outcome }}
+        run: |
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "OK: デプロイ用ロールの引き受けは拒否された"
+          else
+            echo "NG: PR からデプロイ用ロールを引き受けられた（outcome=$OUTCOME）"
+            exit 1
+          fi
+
+      - name: PR 用ロールを引き受ける
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: 状態ファイル本体へ書き込もうとする（拒否されるはず）
+        id: put_state
+        continue-on-error: true
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          set -u
+          printf 'x' > /tmp/role-check-body
+          # 権限の判定が先に走る。--if-none-match により、許可されていても既にある状態ファイルは上書きされない
+          if out="$(aws s3api put-object --bucket "$TF_STATE_BUCKET" --key app/terraform.tfstate --body /tmp/role-check-body --if-none-match '*' 2>&1)"; then
+            echo "NG: 状態ファイル本体への書き込みが通った"
+            exit 1
+          fi
+          if printf '%s' "$out" | grep -q 'AccessDenied'; then
+            echo "OK: AccessDenied で拒否された"
+          else
+            echo "NG: 想定外の応答: $(printf '%s' "$out" | grep -oE '\([A-Za-z]+\)' | head -1)"
+            exit 1
+          fi
+
+      - name: サイト用バケットへ書き込もうとする（拒否されるはず）
+        id: put_site
+        continue-on-error: true
+        working-directory: infra/app
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -u
+          terraform init -input=false -no-color \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" > /dev/null
+          BUCKET="$(terraform output -raw site_bucket_name)"
+          echo "::add-mask::$BUCKET"
+          key="tmp-role-check/$(openssl rand -hex 8)"
+          printf 'x' > /tmp/role-check-body
+          if out="$(aws s3api put-object --bucket "$BUCKET" --key "$key" --body /tmp/role-check-body 2>&1)"; then
+            echo "NG: サイト用バケットへの書き込みが通った（キー: $key）"
+            exit 1
+          fi
+          if printf '%s' "$out" | grep -q 'AccessDenied'; then
+            echo "OK: AccessDenied で拒否された"
+          else
+            echo "NG: 想定外の応答: $(printf '%s' "$out" | grep -oE '\([A-Za-z]+\)' | head -1)"
+            exit 1
+          fi
+
+      - name: 結果をまとめる
+        env:
+          PUT_STATE: ${{ steps.put_state.outcome }}
+          PUT_SITE: ${{ steps.put_site.outcome }}
+        run: |
+          echo "状態ファイル本体: $PUT_STATE / サイト用バケット: $PUT_SITE（どちらも success なら拒否を確認できた）"
+          [ "$PUT_STATE" = "success" ] && [ "$PUT_SITE" = "success" ]
