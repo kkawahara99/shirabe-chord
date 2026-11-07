@@ -112,6 +112,54 @@ body {
   box-shadow: 0 4px 8px rgb(0 0 0 / 0.08);
 }
 
+/* ---- ヘッダー右端のログイン ---- */
+
+.auth-area {
+  position: relative; /* メニューを、ヘッダーを押し広げずに重ねる基準 */
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.auth-notice {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--warn);
+}
+
+.account-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.account-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 8px rgb(0 0 0 / 0.08);
+}
+
+.account-menu button {
+  text-align: left;
+  border: none;
+}
+
+.page {
+  padding: 1rem;
+}
+
 /* ---- 操作の部品（24x24 CSS ピクセル以上。ADR 0020） ---- */
 
 button {
@@ -576,6 +624,7 @@ button.step-remove {
   .how,
   .hand-button,
   .capo-picker,
+  .auth-area,
   .step-remove,
   .step-add,
   .rail-button,

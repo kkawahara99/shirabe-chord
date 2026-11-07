@@ -18,8 +18,16 @@ import {
   type Tension,
 } from "@shirabe-chord/core";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AuthControl } from "./auth-control.tsx";
+import { readAuthConfig, type AuthConfig } from "./auth-config.ts";
+import { AuthProvider } from "./auth-context.tsx";
 import { displayQuality, displaySymbol, displayTension } from "./display-symbol.ts";
+import { parseLoginReturn } from "./login.ts";
 import { handPositionLabel, progressionText } from "./progression-text.ts";
+import { pinMarksOf, readSnapshot, restorePins, type AfterAction } from "./resume.ts";
+import { MinePage, SharePage } from "./route-pages.tsx";
+import { parseRoute } from "./route.ts";
+import { browserStorage } from "./session-store.ts";
 import { ShapePicker } from "./shape-picker.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
@@ -236,8 +244,26 @@ function ExtrasTab(props: { selection: ChordSelection; onChange: (selection: Cho
 type EditorTab = "chord" | "extras" | "shape";
 const TAB_LABELS: Record<EditorTab, string> = { chord: "コード", extras: "テンション・ベース", shape: "押さえ方" };
 
-export function App() {
-  const [chords, setChords] = useState<readonly ChordSelection[]>(INITIAL_CHORDS);
+const DEFAULT_CONFIG = readAuthConfig(import.meta.env);
+
+export type AppProps = {
+  /** ログインと共有の設定。既定はビルド時の環境変数。`null`（空）ならログインと共有の画面を出さない。 */
+  config?: AuthConfig | null;
+  /** 別のページへ移る。既定は `location.assign`。 */
+  goTo?: (url: string) => void;
+  /** ログインから戻ったとき、退避した操作が「共有ダイアログを開く」なら呼ぶ（ダイアログは共有の作成の Issue で作る）。 */
+  onResumeShare?: () => void;
+};
+
+export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.assign(url), onResumeShare }: AppProps = {}) {
+  /** 起動時の URL にあるログインの戻り。戻り先は `/` なので、それ以外のパスでは読まない。設定が空でも読まない。 */
+  const [back] = useState(() =>
+    config && window.location.pathname === "/" ? parseLoginReturn(window.location.search) : ({ kind: "none" } as const),
+  );
+  /** ログインから戻ったときだけ、退避した入力を読む（戻りでないときの古い退避は使わない）。 */
+  const [restored] = useState(() => (back.kind === "none" ? null : readSnapshot(browserStorage())));
+
+  const [chords, setChords] = useState<readonly ChordSelection[]>(restored?.chords ?? INITIAL_CHORDS);
   /** 選んでいるコードの番号。パネルを閉じている間も覚えておく。 */
   const [selected, setSelected] = useState(0);
   const [open, setOpen] = useState(true);
@@ -247,13 +273,32 @@ export function App() {
    * 固定した押さえ方。進行の位置（0 始まり）→ 形。無い位置は「おまかせ」。
    * 記号が変わった位置は外す・コードを削除したら後ろを 1 つ詰める・カポを変えたらすべて外す（ADR 0033）。
    */
-  const [pins, setPins] = useState<ReadonlyMap<number, Shape>>(new Map());
+  const [pins, setPins] = useState<ReadonlyMap<number, Shape>>(() =>
+    restored ? restorePins(restored.chords, restored.capo, restored.pins) : new Map(),
+  );
 
   /** コピーの結果。進行や手の位置が変わったら消す（古い成功を残さない）。 */
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
 
   /** カポの位置（0 はカポなし）。保存しない。進行の記号は鳴らす名前のままで、押さえ方はカポをナットとみなして求める。 */
-  const [capo, setCapo] = useState(0);
+  const [capo, setCapo] = useState(restored?.capo ?? 0);
+
+  const [path, setPath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const navigate = (to: string) => {
+    window.history.pushState(null, "", to);
+    setPath(to);
+  };
+  /** 設定が空のあいだは、`/mine` などを開いてもトップを出す。 */
+  const route = config ? parseRoute(path) : ({ kind: "home" } as const);
+  const resume = (action: AfterAction) => {
+    if (action === "mine") navigate("/mine");
+    else onResumeShare?.();
+  };
 
   const cardButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -353,143 +398,166 @@ export function App() {
     setOpen(true);
   };
 
-  return (
+  const page = (
     <div className="app">
       <header className="site-header">
         <div className="site-title">
           <h1>Shirabeコード</h1>
           <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
         </div>
-        <label className="capo-picker">
-          カポ
-          <select value={capo} onChange={(event) => changeCapo(Number(event.target.value))}>
-            {CAPO_FRETS.map((fret) => (
-              <option key={fret} value={fret}>
-                {fret === 0 ? "なし" : fret}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" className="hand-button" disabled={!handTargetHasShapes} onClick={showHandPosition}>
-          手の位置：{handPositionLabel(handPosition)}
-        </button>
-        <section aria-label="押さえ方の選び方" className="how">
-          <details>
-            <summary>選び方</summary>
-            <ul>
-              <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
-              <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
-              <li>
-                押さえ方を固定すると、固定したうち最も前のコードの最低フレットから5フレット分に、固定していないコードを収めます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
-              </li>
-              <li>押さえ方は、どのコードでも選び直せます。</li>
-              <li>標準チューニングの右利きのギターを前提にしています。</li>
-            </ul>
-          </details>
-        </section>
-      </header>
-      <div className="body">
-        <aside className={open ? "panel" : "panel closed"}>
-          {open ? (
-            <section aria-labelledby="editor-title" className="editor">
-              <div className="editor-head">
-                <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
-                <span className="editor-symbol">{displaySymbol(symbols[selected]!)}</span>
-                <button type="button" ref={closeButton} onClick={closePanel}>
-                  閉じる
-                </button>
-              </div>
-              <div role="group" aria-label="編集の項目" className="tabs">
-                {tabs.map((name) => (
-                  <button key={name} type="button" aria-pressed={name === shownTab} onClick={() => setTab(name)}>
-                    {TAB_LABELS[name]}
-                  </button>
+        {route.kind === "home" && (
+          <>
+            <label className="capo-picker">
+              カポ
+              <select value={capo} onChange={(event) => changeCapo(Number(event.target.value))}>
+                {CAPO_FRETS.map((fret) => (
+                  <option key={fret} value={fret}>
+                    {fret === 0 ? "なし" : fret}
+                  </option>
                 ))}
-              </div>
-              <div className="tab-body">
-                {shownTab === "chord" && <ChordTab selection={chords[selected]!} onChange={changeSelected} />}
-                {shownTab === "extras" && <ExtrasTab selection={chords[selected]!} onChange={changeSelected} />}
-                {shownTab === "shape" && shapes.ok && (
-                  <ShapePicker
-                    symbol={shapeSymbols[selected]!}
-                    shapes={shapes.shapes}
-                    pickedIndex={pins.get(selected)?.candidateIndex ?? null}
-                    onPick={(shape) => setPin(selected, shape)}
-                  />
-                )}
-              </div>
+              </select>
+            </label>
+            <button type="button" className="hand-button" disabled={!handTargetHasShapes} onClick={showHandPosition}>
+              手の位置：{handPositionLabel(handPosition)}
+            </button>
+            <section aria-label="押さえ方の選び方" className="how">
+              <details>
+                <summary>選び方</summary>
+                <ul>
+                  <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
+                  <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
+                  <li>
+                    押さえ方を固定すると、固定したうち最も前のコードの最低フレットから5フレット分に、固定していないコードを収めます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
+                  </li>
+                  <li>押さえ方は、どのコードでも選び直せます。</li>
+                  <li>標準チューニングの右利きのギターを前提にしています。</li>
+                </ul>
+              </details>
             </section>
-          ) : (
-            <button type="button" className="rail-button" onClick={openFromRail}>
-              編集を開く
-            </button>
-          )}
-        </aside>
-        <section aria-label="進行の押さえ方" className="score">
-          <div className="score-actions">
-            <button type="button" disabled={!result.ok} onClick={() => window.print()}>
-              印刷
-            </button>
-            <button type="button" disabled={!result.ok} onClick={copyText}>
-              テキストでコピー
-            </button>
-            <p role="status">
-              {copyStatus === "copied" && "コピーしました"}
-              {copyStatus === "failed" && "コピーできませんでした"}
-            </p>
-          </div>
-          {capo > 0 && <p className="capo-note">カポ{capo}</p>}
-          {!result.ok && (
-            <div role="alert" className="failures">
-              <ul>
-                {failureMessages(result, symbols).map((message, i) => (
-                  <li key={i}>{message}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <ul className="steps" aria-label="コード進行">
-            {symbols.map((symbol, i) => {
-              const step = result.ok ? result.steps[i] : undefined;
-              return (
-                <li key={i} className="step">
-                  <span className="step-number">{i + 1}</span>
-                  <button
-                    type="button"
-                    className="step-select"
-                    ref={(element) => {
-                      cardButtons.current[i] = element;
-                    }}
-                    aria-pressed={open && i === selected}
-                    data-symbol={symbol}
-                    onClick={() => chooseChord(i)}
-                  >
-                    {displaySymbol(symbol)}
+          </>
+        )}
+        {config && <AuthControl onOpenMine={() => navigate("/mine")} />}
+      </header>
+      {route.kind === "mine" && <MinePage onHome={() => navigate("/")} />}
+      {route.kind === "share" && <SharePage onHome={() => navigate("/")} />}
+      {route.kind === "home" && (
+        <div className="body">
+          <aside className={open ? "panel" : "panel closed"}>
+            {open ? (
+              <section aria-labelledby="editor-title" className="editor">
+                <div className="editor-head">
+                  <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
+                  <span className="editor-symbol">{displaySymbol(symbols[selected]!)}</span>
+                  <button type="button" ref={closeButton} onClick={closePanel}>
+                    閉じる
                   </button>
-                  {pins.has(i) && <span className="step-pinned">固定</span>}
-                  {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
-                  {step && capo > 0 && <p className="step-shape">{displaySymbol(step.symbol)}の形</p>}
-                  {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
-                  <button
-                    type="button"
-                    className="step-remove"
-                    aria-label={`${i + 1}番目のコードを削除`}
-                    disabled={chords.length <= 1}
-                    onClick={() => removeChord(i)}
-                  >
-                    ×
-                  </button>
-                </li>
-              );
-            })}
-            <li className="step-add">
-              <button type="button" disabled={chords.length >= MAX_PROGRESSION_CHORDS} onClick={addChord}>
-                ＋ コードを追加
+                </div>
+                <div role="group" aria-label="編集の項目" className="tabs">
+                  {tabs.map((name) => (
+                    <button key={name} type="button" aria-pressed={name === shownTab} onClick={() => setTab(name)}>
+                      {TAB_LABELS[name]}
+                    </button>
+                  ))}
+                </div>
+                <div className="tab-body">
+                  {shownTab === "chord" && <ChordTab selection={chords[selected]!} onChange={changeSelected} />}
+                  {shownTab === "extras" && <ExtrasTab selection={chords[selected]!} onChange={changeSelected} />}
+                  {shownTab === "shape" && shapes.ok && (
+                    <ShapePicker
+                      symbol={shapeSymbols[selected]!}
+                      shapes={shapes.shapes}
+                      pickedIndex={pins.get(selected)?.candidateIndex ?? null}
+                      onPick={(shape) => setPin(selected, shape)}
+                    />
+                  )}
+                </div>
+              </section>
+            ) : (
+              <button type="button" className="rail-button" onClick={openFromRail}>
+                編集を開く
               </button>
-            </li>
-          </ul>
-        </section>
-      </div>
+            )}
+          </aside>
+          <section aria-label="進行の押さえ方" className="score">
+            <div className="score-actions">
+              <button type="button" disabled={!result.ok} onClick={() => window.print()}>
+                印刷
+              </button>
+              <button type="button" disabled={!result.ok} onClick={copyText}>
+                テキストでコピー
+              </button>
+              <p role="status">
+                {copyStatus === "copied" && "コピーしました"}
+                {copyStatus === "failed" && "コピーできませんでした"}
+              </p>
+            </div>
+            {capo > 0 && <p className="capo-note">カポ{capo}</p>}
+            {!result.ok && (
+              <div role="alert" className="failures">
+                <ul>
+                  {failureMessages(result, symbols).map((message, i) => (
+                    <li key={i}>{message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <ul className="steps" aria-label="コード進行">
+              {symbols.map((symbol, i) => {
+                const step = result.ok ? result.steps[i] : undefined;
+                return (
+                  <li key={i} className="step">
+                    <span className="step-number">{i + 1}</span>
+                    <button
+                      type="button"
+                      className="step-select"
+                      ref={(element) => {
+                        cardButtons.current[i] = element;
+                      }}
+                      aria-pressed={open && i === selected}
+                      data-symbol={symbol}
+                      onClick={() => chooseChord(i)}
+                    >
+                      {displaySymbol(symbol)}
+                    </button>
+                    {pins.has(i) && <span className="step-pinned">固定</span>}
+                    {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
+                    {step && capo > 0 && <p className="step-shape">{displaySymbol(step.symbol)}の形</p>}
+                    {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
+                    <button
+                      type="button"
+                      className="step-remove"
+                      aria-label={`${i + 1}番目のコードを削除`}
+                      disabled={chords.length <= 1}
+                      onClick={() => removeChord(i)}
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
+              <li className="step-add">
+                <button type="button" disabled={chords.length >= MAX_PROGRESSION_CHORDS} onClick={addChord}>
+                  ＋ コードを追加
+                </button>
+              </li>
+            </ul>
+          </section>
+        </div>
+      )}
     </div>
+  );
+
+  if (!config) return page;
+  return (
+    <AuthProvider
+      config={config}
+      back={back}
+      after={restored?.after ?? null}
+      captureSnapshot={(after) => ({ chords, capo, pins: pinMarksOf(pins), after })}
+      onResume={resume}
+      goTo={goTo}
+    >
+      {page}
+    </AuthProvider>
   );
 }
