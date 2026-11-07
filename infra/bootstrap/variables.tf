@@ -32,13 +32,14 @@ variable "region" {
   }
 }
 
-variable "github_repository" {
+variable "github_oidc_sub_prefix" {
   type        = string
-  description = "GitHub Actions に AWS への入口を許すリポジトリ（owner/repo の形）。信頼ポリシーの StringEquals は大文字小文字を区別するので、GitHub 上の実際の表記に合わせる。"
+  description = "GitHub Actions に AWS への入口を許すリポジトリの、OIDC トークンの sub の接頭辞。形はリポジトリの設定で変わるので、gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix の出力をそのまま渡す（docs/adr/0029-trust-the-actual-github-oidc-subject.md）。"
 
   validation {
-    condition     = can(regex("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", var.github_repository))
-    error_message = "github_repository は owner/repo の形にしてください（owner は英数字とハイフン、repo は英数字と . _ -）。"
+    # 不変の形（repo:owner@ID/repo@ID）か、従来の形（repo:owner/repo）。片方だけに ID がある値は、書き写しの誤りとして止める
+    condition     = can(regex("^repo:(?:[A-Za-z0-9-]+@[0-9]+/[A-Za-z0-9._-]+@[0-9]+|[A-Za-z0-9-]+/[A-Za-z0-9._-]+)$", var.github_oidc_sub_prefix))
+    error_message = "github_oidc_sub_prefix は repo:owner@ID/repo@ID か repo:owner/repo の形にしてください（gh api repos/<owner>/<repo>/actions/oidc/customization/sub の sub_claim_prefix の値）。"
   }
 }
 

@@ -1,7 +1,7 @@
 # 入力変数の validation を確かめる。terraform test には性質テストの仕組みが無いため、境界値の点で確かめる。
 
 variables {
-  github_repository = "example-owner/example-repo"
+  github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 }
 
 mock_provider "aws" {
@@ -184,98 +184,189 @@ run "region_異常_me-central-1は失敗" {
   expect_failures = [var.region]
 }
 
-# --- github_repository ---
+# --- github_oidc_sub_prefix ---
 
-run "github_repository_正常_owner_repoの形は通る" {
+run "github_oidc_sub_prefix_正常_不変の形は通る" {
   command = plan
   variables {
-    github_repository = "example-owner/example-repo"
+    github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
   }
   assert {
-    condition     = var.github_repository == "example-owner/example-repo"
-    error_message = "example-owner/example-repo の github_repository が通らない"
+    condition     = var.github_oidc_sub_prefix == "repo:example-owner@1000/example-repo@2000"
+    error_message = "repo:example-owner@1000/example-repo@2000 の github_oidc_sub_prefix が通らない"
   }
 }
 
-run "github_repository_正常_repo名に点_アンダースコア_ハイフンを含んでも通る" {
+run "github_oidc_sub_prefix_正常_従来の形は通る" {
   command = plan
   variables {
-    github_repository = "o-1/my.repo_x-y"
+    github_oidc_sub_prefix = "repo:example-owner/example-repo"
   }
   assert {
-    condition     = var.github_repository == "o-1/my.repo_x-y"
-    error_message = "o-1/my.repo_x-y の github_repository が通らない"
+    condition     = var.github_oidc_sub_prefix == "repo:example-owner/example-repo"
+    error_message = "repo:example-owner/example-repo の github_oidc_sub_prefix が通らない"
   }
 }
 
-run "github_repository_異常_スラッシュなしは失敗" {
+run "github_oidc_sub_prefix_正常_repo名に点_アンダースコア_ハイフンを含んでも通る" {
   command = plan
   variables {
-    github_repository = "example-repo"
+    github_oidc_sub_prefix = "repo:o-1@1/my.repo_x-y@2"
   }
-  expect_failures = [var.github_repository]
+  assert {
+    condition     = var.github_oidc_sub_prefix == "repo:o-1@1/my.repo_x-y@2"
+    error_message = "repo:o-1@1/my.repo_x-y@2 の github_oidc_sub_prefix が通らない"
+  }
 }
 
-run "github_repository_異常_空は失敗" {
+run "github_oidc_sub_prefix_異常_repo接頭辞なしは失敗" {
   command = plan
   variables {
-    github_repository = ""
+    github_oidc_sub_prefix = "example-owner/example-repo"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_ownerが空は失敗" {
+run "github_oidc_sub_prefix_異常_ownerだけにIDがあるは失敗" {
   command = plan
   variables {
-    github_repository = "/repo"
+    github_oidc_sub_prefix = "repo:a@1/b"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_repoが空は失敗" {
+run "github_oidc_sub_prefix_異常_repoだけにIDがあるは失敗" {
   command = plan
   variables {
-    github_repository = "owner/"
+    github_oidc_sub_prefix = "repo:a/b@2"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_スラッシュが2つは失敗" {
+run "github_oidc_sub_prefix_異常_IDが数字でないは失敗" {
   command = plan
   variables {
-    github_repository = "a/b/c"
+    github_oidc_sub_prefix = "repo:a@x/b@2"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_ownerにアンダースコアを含むと失敗" {
+run "github_oidc_sub_prefix_異常_IDが空は失敗" {
   command = plan
   variables {
-    github_repository = "a_b/c"
+    github_oidc_sub_prefix = "repo:a@/b@2"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_ownerに点を含むと失敗" {
+run "github_oidc_sub_prefix_異常_sub全体を渡すは失敗" {
   command = plan
   variables {
-    github_repository = "a.b/c"
+    github_oidc_sub_prefix = "repo:a@1/b@2:pull_request"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_アスタリスクを含むと失敗" {
+run "github_oidc_sub_prefix_異常_従来の形でsub全体を渡すは失敗" {
   command = plan
   variables {
-    github_repository = "owner/re*po"
+    github_oidc_sub_prefix = "repo:a/b:pull_request"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
 }
 
-run "github_repository_異常_空白を含むと失敗" {
+run "github_oidc_sub_prefix_異常_repoのIDが数字でないは失敗" {
   command = plan
   variables {
-    github_repository = "owner/re po"
+    github_oidc_sub_prefix = "repo:a@1/b@x"
   }
-  expect_failures = [var.github_repository]
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_repoのIDが空は失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:a@1/b@"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_repoのIDがアスタリスクは失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:a@1/b@*"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_スラッシュなしは失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:example-repo"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_空は失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = ""
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_ownerが空は失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:/repo"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_repoが空は失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:owner/"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_スラッシュが2つは失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:a/b/c"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_ownerにアンダースコアは失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:a_b/c"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_ownerに点は失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:a.b/c"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_アスタリスクは失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:owner/re*po"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
+}
+
+run "github_oidc_sub_prefix_異常_空白は失敗" {
+  command = plan
+  variables {
+    github_oidc_sub_prefix = "repo:owner/re po"
+  }
+  expect_failures = [var.github_oidc_sub_prefix]
 }

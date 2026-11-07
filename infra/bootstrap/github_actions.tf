@@ -44,7 +44,7 @@ resource "aws_iam_role" "deploy" {
         Condition = {
           StringEquals = {
             "${local.github_oidc_host}:aud" = "sts.amazonaws.com"
-            "${local.github_oidc_host}:sub" = "repo:${var.github_repository}:ref:refs/heads/main"
+            "${local.github_oidc_host}:sub" = "${var.github_oidc_sub_prefix}:ref:refs/heads/main"
           }
         }
       },
@@ -130,7 +130,7 @@ resource "aws_iam_role" "plan" {
         Condition = {
           StringEquals = {
             "${local.github_oidc_host}:aud" = "sts.amazonaws.com"
-            "${local.github_oidc_host}:sub" = "repo:${var.github_repository}:pull_request"
+            "${local.github_oidc_host}:sub" = "${var.github_oidc_sub_prefix}:pull_request"
           }
         }
       },

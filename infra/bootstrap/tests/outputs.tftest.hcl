@@ -1,7 +1,7 @@
 # 出力（本体の backend に写す値）を確かめる。
 
 variables {
-  github_repository = "example-owner/example-repo"
+  github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 }
 
 mock_provider "aws" {

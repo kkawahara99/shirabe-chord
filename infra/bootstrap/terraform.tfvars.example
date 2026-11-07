@@ -1,12 +1,14 @@
 # terraform.tfvars にコピーして使う（terraform.tfvars は gitignore 対象）。値は見本。
 # アカウントIDは書かない。デプロイ先から自動で引く。
 
+# project_name と environment は変えない（CI は infra/app に既定値で流すので、変えるとロールの権限とずれる）
 project_name = "shirabe"
 environment  = "prd"
 region       = "ap-northeast-1"
 
-# GitHub Actions に AWS への入口を許すリポジトリ（owner/repo）。大文字小文字は GitHub 上の表記に合わせる
-github_repository = "example-owner/example-repo"
+# GitHub Actions に AWS への入口を許すリポジトリの sub の接頭辞。次の出力をそのまま書く（形はリポジトリの設定で変わる）
+#   gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 
 # OIDC プロバイダが既にあるアカウントでは false にする
 create_github_oidc_provider = true
