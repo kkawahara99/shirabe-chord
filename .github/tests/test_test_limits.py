@@ -17,10 +17,19 @@ from typing import NamedTuple
 from test_workflows import WORKFLOWS_DIR, run_blocks
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_DIRS = [ROOT / "apps" / "web" / "src", ROOT / "packages" / "core" / "src"]
-PACKAGE_JSONS = [ROOT / "package.json", ROOT / "apps" / "web" / "package.json", ROOT / "packages" / "core" / "package.json"]
-# 上限を明示する設定ファイル（web は vite.config.ts の test、core は vitest.config.ts）
-CONFIG_FILES = [ROOT / "apps" / "web" / "vite.config.ts", ROOT / "packages" / "core" / "vitest.config.ts"]
+SOURCE_DIRS = [ROOT / "apps" / "web" / "src", ROOT / "apps" / "api" / "src", ROOT / "packages" / "core" / "src"]
+PACKAGE_JSONS = [
+    ROOT / "package.json",
+    ROOT / "apps" / "web" / "package.json",
+    ROOT / "apps" / "api" / "package.json",
+    ROOT / "packages" / "core" / "package.json",
+]
+# 上限を明示する設定ファイル（web と api は vite.config.ts の test、core は vitest.config.ts）
+CONFIG_FILES = [
+    ROOT / "apps" / "web" / "vite.config.ts",
+    ROOT / "apps" / "api" / "vite.config.ts",
+    ROOT / "packages" / "core" / "vitest.config.ts",
+]
 MAX_TIMEOUT_MS = 5000
 
 # --- 字句に分ける ---------------------------------------------------------------
@@ -333,7 +342,7 @@ def check_config_files(root: Path) -> list[str]:
     """設定ファイルを置いてよい場所だけに置かれている。vitest.config.* が web にあると vite.config.ts を黙って上書きする。"""
     allowed = {root / "packages" / "core" / "vitest.config.ts"}
     problems = []
-    for directory in (root, root / "apps" / "web", root / "packages" / "core"):
+    for directory in (root, root / "apps" / "web", root / "apps" / "api", root / "packages" / "core"):
         if not directory.is_dir():
             continue
         for path in sorted(directory.iterdir()):
@@ -354,6 +363,8 @@ class RealRepositoryTest(unittest.TestCase):
         # パスの書き損じで 0 件のまま通らないように
         self.assertGreater(len([p for p in source_files() if p.name.endswith((".test.ts", ".test.tsx"))]), 10)
         self.assertTrue(any(p.name == "test-setup.ts" for p in source_files()))
+        for directory in SOURCE_DIRS:
+            self.assertTrue(any(p.name.endswith(".test.ts") for p in directory.rglob("*")), directory.relative_to(ROOT).as_posix())
         self.assertEqual([p for p in PACKAGE_JSONS + CONFIG_FILES if not p.is_file()], [])
         self.assertGreater(len(list(WORKFLOWS_DIR.glob("*.yml"))), 0)
 
@@ -633,7 +644,7 @@ class ConfigFilesTest(unittest.TestCase):
             return check_config_files(root)
 
     def test_想定の配置は許す(self):
-        self.assertEqual(self.check_with(["apps/web/vite.config.ts", "packages/core/vitest.config.ts"]), [])
+        self.assertEqual(self.check_with(["apps/web/vite.config.ts", "apps/api/vite.config.ts", "packages/core/vitest.config.ts"]), [])
 
     def test_想定外の設定ファイルを検出する(self):
         for name in [
@@ -642,6 +653,8 @@ class ConfigFilesTest(unittest.TestCase):
             "vitest.projects.ts",
             "apps/web/vitest.config.ts",
             "apps/web/vitest.workspace.json",
+            "apps/api/vitest.config.ts",
+            "apps/api/vitest.workspace.ts",
             "packages/core/vitest.workspace.ts",
             "packages/core/vitest.projects.js",
             "packages/core/vitest.config.mts",
@@ -650,7 +663,7 @@ class ConfigFilesTest(unittest.TestCase):
                 self.assertEqual(len(self.check_with(["packages/core/vitest.config.ts", name])), 1)
 
     def test_関係のないファイルは見ない(self):
-        self.assertEqual(self.check_with(["packages/core/vitest.config.ts", "apps/web/vite.config.ts", "work/vitest.config.ts", "apps/web/src/vitest.config.ts"]), [])
+        self.assertEqual(self.check_with(["packages/core/vitest.config.ts", "apps/web/vite.config.ts", "work/vitest.config.ts", "apps/web/src/vitest.config.ts", "apps/api/src/vitest.config.ts"]), [])
 
 
 if __name__ == "__main__":
