@@ -47,7 +47,7 @@ const firstShapes = (symbol: string) => {
 const expectedLabels = (symbols: string[], shapeIndex?: number) => {
   const result = optimizeSymbols(
     symbols,
-    shapeIndex === undefined ? undefined : { firstVoicing: firstShapes(symbols[0]!)[shapeIndex]!.voicing },
+    shapeIndex === undefined ? undefined : { pins: new Map([[0, firstShapes(symbols[0]!)[shapeIndex]!.voicing]]) },
   );
   if (!result.ok) throw new Error("optimize");
   return result.steps.map((step) => voicingLabel(step.symbol, step.voicing));
@@ -450,7 +450,7 @@ describe("App（画面全体）", () => {
     const index = shapes.findIndex((shape) => shape.lowestFret === 10);
     expect(index).toBeGreaterThanOrEqual(0);
     fireEvent.click(cardButton(index));
-    const result = optimizeSymbols(["C", "Db7(b9,#11)", "F", "G7"], { firstVoicing: shapes[index]!.voicing });
+    const result = optimizeSymbols(["C", "Db7(b9,#11)", "F", "G7"], { pins: new Map([[0, shapes[index]!.voicing]]) });
     if (!result.ok) throw new Error("optimize");
     const expected = result.steps.filter((step) => step.inWindow === false).length;
     expect(expected).toBeGreaterThan(0);

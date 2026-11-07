@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_PROGRESSION_CHORDS, MAX_PROGRESSION_LENGTH, optimizeProgression, optimizeSymbols, splitProgression } from "./progression.ts";
+import { scoredTransitionCost, scoreVoicing } from "./cost.ts";
 import { chord, chordSymbols, lowestFretOf, pressedFretsOf, show, v } from "./test-helpers.ts";
 import { generateVoicings, validateVoicing, type Voicing } from "./voicing.ts";
 
@@ -298,150 +299,275 @@ function succeeded(result: ReturnType<typeof optimizeSymbols>) {
 const fitsWindow = (voicing: Voicing, low: number, high: number) =>
   pressedFretsOf(voicing).every((fret) => fret >= low && fret <= high);
 
-describe("optimizeSymbols: 最初の押さえ方の指定（firstVoicing）", () => {
+/** `pins` を Map にして最適化し、成功を期待して返す。 */
+const pinned = (symbols: string[], ...pins: [number, Voicing][]) =>
+  succeeded(optimizeSymbols(symbols, { pins: new Map(pins) }));
+const shown = (result: ReturnType<typeof succeeded>) => result.steps.map((step) => show(step.voicing));
+
+describe("optimizeSymbols: 固定（pins）", () => {
   const barreAt8 = v("8 10 10 9 8 8"); // C の 8 フレットのセーハ形
+  const barreAt3 = v("355433"); // G の 3 フレットのセーハ形
+  const barreAt5 = v("577555"); // Am の 5 フレットのセーハ形
+  const barreAt1 = v("133211"); // F の 1 フレットのセーハ形
+  const CAMFG = ["C", "Am", "F", "G"];
 
-  it("指定した押さえ方が、先頭の押さえ方になる", () => {
-    expect(validateVoicing(barreAt8, chord("C"))).toEqual({ ok: true });
-    const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: barreAt8 }));
-    expect(result.steps[0]!.voicing).toEqual(barreAt8);
-    expect(result.steps).toHaveLength(4);
+  describe("固定した形が出力に残り、残りが選び直される", () => {
+    it("先頭を固定すると、その形が 0 番目にそのまま出る", () => {
+      expect(validateVoicing(barreAt8, chord("C"))).toEqual({ ok: true });
+      const result = pinned(CAMFG, [0, barreAt8]);
+      expect(result.steps[0]!.voicing).toEqual(barreAt8);
+      expect(result.steps).toHaveLength(4);
+    });
+
+    it("途中（2 番目）を固定すると、その形が残り、前後は窓に収まる形に選び直される", () => {
+      const result = pinned(CAMFG, [1, barreAt5]);
+      expect(result.steps[1]!.voicing).toEqual(barreAt5);
+      expect(shown(result)).not.toEqual(shown(succeeded(optimizeSymbols(CAMFG))));
+      for (const step of result.steps) expect(fitsWindow(step.voicing, 5, 9)).toBe(true);
+    });
+
+    it("末尾を固定すると、その形が残り、手前は窓に収まる形に選び直される", () => {
+      const result = pinned(CAMFG, [3, barreAt3]);
+      expect(result.steps[3]!.voicing).toEqual(barreAt3);
+      expect(show(result.steps[0]!.voicing)).toBe("x35553"); // 固定なしでは x32010
+      expect(show(result.steps[1]!.voicing)).toBe("577555");
+    });
+
+    it("複数（0 番目と 3 番目）を固定すると、どちらもそのまま残る", () => {
+      const result = pinned(CAMFG, [0, barreAt8], [3, barreAt3]);
+      expect(result.steps[0]!.voicing).toEqual(barreAt8);
+      expect(result.steps[3]!.voicing).toEqual(barreAt3);
+    });
+
+    it("固定が無い（pins なし・空の Map）なら、結果は変わらず inWindow も付かない", () => {
+      const plain = succeeded(optimizeSymbols(CAMFG));
+      expect(shown(plain)).toEqual(["x32010", "x02210", "133211", "320003"]);
+      for (const step of plain.steps) expect("inWindow" in step).toBe(false);
+      expect(optimizeSymbols(CAMFG, {})).toEqual(plain);
+      expect(optimizeSymbols(CAMFG, { pins: new Map() })).toEqual(plain);
+    });
+
+    it("窓のかからない固定（開放だけの Em7）を途中に置くと、前後の選び方は全組み合わせの総コスト最小になる", () => {
+      const openOnly = v("0x0000");
+      const result = pinned(["C", "Em7", "Am"], [1, openOnly]);
+      const scoredPin = scoreVoicing(openOnly);
+      const scoredOf = (symbol: string) => generateVoicings(chord(symbol)).map((voicing) => scoreVoicing(voicing));
+      let best = Number.POSITIVE_INFINITY;
+      for (const first of scoredOf("C")) {
+        for (const last of scoredOf("Am")) {
+          const total =
+            first.cost + scoredTransitionCost(first, scoredPin) + scoredPin.cost + scoredTransitionCost(scoredPin, last) + last.cost;
+          best = Math.min(best, total);
+        }
+      }
+      expect(result.steps[1]!.voicing).toEqual(openOnly);
+      expect(result.totalCost).toBeCloseTo(best, 9);
+    });
+
+    it("窓がかかる固定（Am の 577555）を途中に置くと、前後は 5〜9 フレットの窓に収まる候補の全組み合わせの総コスト最小になる", () => {
+      const result = pinned(["C", "Am", "F"], [1, barreAt5]);
+      const scoredPin = scoreVoicing(barreAt5);
+      const scoredInWindow = (symbol: string) =>
+        generateVoicings(chord(symbol))
+          .filter((voicing) => fitsWindow(voicing, 5, 9))
+          .map((voicing) => scoreVoicing(voicing));
+      let best = Number.POSITIVE_INFINITY;
+      for (const first of scoredInWindow("C")) {
+        for (const last of scoredInWindow("F")) {
+          const total =
+            first.cost + scoredTransitionCost(first, scoredPin) + scoredPin.cost + scoredTransitionCost(scoredPin, last) + last.cost;
+          best = Math.min(best, total);
+        }
+      }
+      expect(result.totalCost).toBeCloseTo(best, 9);
+    });
+
+    it("x35553 を先頭に固定した C Am F G の Am は、開放弦を使わない 577555 になる（高い位置の開放弦は不利。ADR 0024）", () => {
+      const result = pinned(CAMFG, [0, v("x35553")]);
+      expect(show(result.steps[0]!.voicing)).toBe("x35553");
+      expect(show(result.steps[1]!.voicing)).toBe("577555");
+    });
   });
 
-  it("x35553 を指定した C Am F G の Am は、開放弦を使わない 577555 になる（高い位置の開放弦は不利。変更前は x0x555）", () => {
-    const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: v("x35553") }));
-    expect(show(result.steps[0]!.voicing)).toBe("x35553");
-    expect(show(result.steps[1]!.voicing)).toBe("577555");
+  describe("手の位置の窓は 1 つだけ", () => {
+    it("最低フレット 5 の C を先頭に固定すると、続くコードは開放に戻らず 5〜9 フレットの窓に収まる", () => {
+      const first = shapesWithLowestFret("C", 5)[0]!;
+      const result = pinned(CAMFG, [0, first]);
+      expect(result.steps.map((step) => step.inWindow)).toEqual([true, true, true, true]);
+      for (const step of result.steps.slice(1)) expect(fitsWindow(step.voicing, 5, 9)).toBe(true);
+      expect(show(result.steps[1]!.voicing)).not.toBe("x02210"); // 固定なしのときの Am（開放寄り）
+    });
+
+    it("1 番目を 8 フレット、3 番目を 1 フレットに固定しても、4 番目は 1 番目の窓（8〜12）に収まる", () => {
+      const result = pinned(CAMFG, [0, barreAt8], [2, barreAt1]);
+      expect(result.steps[2]!.voicing).toEqual(barreAt1);
+      expect(fitsWindow(result.steps[1]!.voicing, 8, 12)).toBe(true);
+      expect(fitsWindow(result.steps[3]!.voicing, 8, 12)).toBe(true);
+      expect(show(result.steps[3]!.voicing)).not.toBe("320003"); // 1 フレットの窓なら選ばれる形
+    });
+
+    it("先頭の固定が開放・ミュートだけなら、押さえるフレットがある次の固定が窓の基準になり、その手前にも窓が及ぶ", () => {
+      const result = pinned(["Em7", "C", "Am", "F"], [0, v("0x0000")], [2, barreAt5]);
+      expect(show(result.steps[0]!.voicing)).toBe("0x0000");
+      for (const i of [1, 3]) expect(fitsWindow(result.steps[i]!.voicing, 5, 9)).toBe(true);
+      expect(show(result.steps[1]!.voicing)).not.toBe("x32010"); // 窓が手前に及ばなければ選ばれる形
+    });
+
+    it("押さえるフレットがある固定が無い（開放・ミュートだけ）なら、窓をかけず開放寄りの形が選ばれ、inWindow は全て true", () => {
+      const result = pinned(["Em7", "C", "Am", "F"], [0, v("0x0000")]);
+      expect(result.steps.map((step) => step.inWindow)).toEqual([true, true, true, true]);
+      expect(shown(result)).toEqual(["0x0000", "x32010", "x02210", "133211"]);
+    });
+
+    it("窓に収まる候補が無いコードは窓を広げて選び、inWindow:false が付く", () => {
+      // C7(9,13) は 10〜14 フレットの窓に押さえ方が無い。最低フレット 10 の C を固定すると窓は 10〜14。
+      const first = shapesWithLowestFret("C", 10)[0]!;
+      expect(generateVoicings(chord("C7(9,13)")).some((c) => fitsWindow(c, 10, 14))).toBe(false);
+      const result = pinned(["C", "C7(9,13)"], [0, first]);
+      expect(result.steps.map((step) => step.inWindow)).toEqual([true, false]);
+      expect(validateVoicing(result.steps[1]!.voicing, chord("C7(9,13)"))).toEqual({ ok: true });
+      // 窓は 1 つずつ広がるので、いちばん近い押さえ方が選ばれる。
+      expect(lowestFretOf(result.steps[1]!.voicing)).toBe(8);
+    });
+
+    it("窓を広げても、続くコードは広げずに収まるなら inWindow:true のまま", () => {
+      const first = shapesWithLowestFret("C", 10)[0]!;
+      const result = pinned(["C", "C7(9,13)", "C"], [0, first]);
+      expect(result.steps.map((step) => step.inWindow)).toEqual([true, false, true]);
+    });
   });
 
-  it("最低フレット 5 の C を指定すると、続くコードは開放に戻らず 5〜9 フレットの窓に収まる", () => {
-    const first = shapesWithLowestFret("C", 5)[0]!;
-    const result = succeeded(optimizeSymbols(["C", "Am", "F", "G"], { firstVoicing: first }));
-    expect(result.steps.map((step) => step.inWindow)).toEqual([true, true, true, true]);
-    for (const step of result.steps.slice(1)) expect(fitsWindow(step.voicing, 5, 9)).toBe(true);
-    expect(show(result.steps[1]!.voicing)).not.toBe("x02210"); // 指定なしのときの Am（開放寄り）
-  });
+  describe("inWindow", () => {
+    it("固定が 1 つでもあれば、全ステップに inWindow が付く", () => {
+      const result = pinned(CAMFG, [2, barreAt1]);
+      for (const step of result.steps) expect(typeof step.inWindow).toBe("boolean");
+    });
 
-  it("inWindow が true のコードは、押さえるフレットがすべて窓に収まり、false のコードは窓に収まる候補が元々無い（性質）", () => {
-    fc.assert(
-      fc.property(
-        fc.array(chordSymbols, { minLength: 1, maxLength: 6 }),
-        fc.nat(),
-        (list, pick) => {
-          const firstCandidates = generateVoicings(chord(list[0]!));
-          const first = firstCandidates[pick % firstCandidates.length]!;
-          const result = succeeded(optimizeSymbols(list, { firstVoicing: first }));
-          expect(result.steps[0]!.voicing).toEqual(first);
-          const lowest = lowestFretOf(first);
-          result.steps.forEach((step, i) => {
-            if (lowest === undefined) return expect(step.inWindow).toBe(true);
-            const anyFits = generateVoicings(chord(list[i]!)).some((c) => fitsWindow(c, lowest, lowest + 4));
-            if (step.inWindow) expect(fitsWindow(step.voicing, lowest, lowest + 4)).toBe(true);
-            else expect(anyFits).toBe(false);
-            if (i === 0) expect(step.inWindow).toBe(true);
+    it("固定したコードは、窓の外にあっても inWindow:true（8 フレットの固定のあとの 1 フレットの固定）", () => {
+      const result = pinned(CAMFG, [0, barreAt8], [2, barreAt1]);
+      expect(result.steps[2]!.inWindow).toBe(true);
+      expect(fitsWindow(barreAt1, 8, 12)).toBe(false);
+    });
+
+    it("固定したコードは固定した形・inWindow:true。固定していないコードは、true なら基準の窓に収まり、false なら窓に収まる候補が元々無い（性質）", () => {
+      fc.assert(
+        fc.property(
+          fc.array(fc.tuple(chordSymbols, fc.option(fc.nat(), { nil: undefined })), { minLength: 1, maxLength: 6 }),
+          (items) => {
+            const list = items.map(([symbol]) => symbol);
+            const pins = new Map<number, Voicing>();
+            items.forEach(([symbol, pick], i) => {
+              if (pick === undefined) return;
+              const candidates = generateVoicings(chord(symbol));
+              pins.set(i, candidates[pick % candidates.length]!);
+            });
+            const result = succeeded(optimizeSymbols(list, { pins }));
+            const basis = [...pins.keys()]
+              .sort((a, b) => a - b)
+              .map((i) => lowestFretOf(pins.get(i)!))
+              .find((fret) => fret !== undefined);
+            result.steps.forEach((step, i) => {
+              if (pins.size === 0) return expect("inWindow" in step).toBe(false);
+              if (pins.has(i)) {
+                expect(step.voicing).toEqual(pins.get(i));
+                return expect(step.inWindow).toBe(true);
+              }
+              if (basis === undefined) return expect(step.inWindow).toBe(true);
+              const anyFits = generateVoicings(chord(list[i]!)).some((c) => fitsWindow(c, basis, basis + 4));
+              if (step.inWindow) expect(fitsWindow(step.voicing, basis, basis + 4)).toBe(true);
+              else expect(anyFits).toBe(false);
+            });
+          },
+        ),
+        { numRuns: 40 },
+      );
+    });
+
+    it("candidateIndex は、固定・窓で絞ったあとも generateVoicings の結果全体の中の位置（性質）", () => {
+      fc.assert(
+        fc.property(fc.array(chordSymbols, { minLength: 1, maxLength: 6 }), fc.nat(), fc.nat(), (list, position, pick) => {
+          const at = position % list.length;
+          const candidates = generateVoicings(chord(list[at]!));
+          const result = pinned(list, [at, candidates[pick % candidates.length]!]);
+          result.steps.forEach((step) => {
+            expect(step.voicing).toEqual(generateVoicings(chord(step.symbol))[step.candidateIndex]);
           });
-        },
-      ),
-      { numRuns: 40 },
-    );
-  });
+        }),
+        { numRuns: 30 },
+      );
+    });
 
-  it("窓に収まる候補が無いコードは窓を広げて選び、inWindow:false が付く", () => {
-    // C7(9,13) は 9〜13 フレットの窓に押さえ方が無い。最低フレット 10 の C を指定すると窓は 10〜14。
-    const first = shapesWithLowestFret("C", 10)[0]!;
-    expect(generateVoicings(chord("C7(9,13)")).some((c) => fitsWindow(c, 10, 14))).toBe(false);
-    const result = succeeded(optimizeSymbols(["C", "C7(9,13)"], { firstVoicing: first }));
-    expect(result.steps.map((step) => step.inWindow)).toEqual([true, false]);
-    expect(validateVoicing(result.steps[1]!.voicing, chord("C7(9,13)"))).toEqual({ ok: true });
-    // 窓は 1 つずつ広がるので、いちばん近い押さえ方が選ばれる。
-    expect(lowestFretOf(result.steps[1]!.voicing)).toBe(8);
-  });
-
-  it("窓を広げても、続くコードは広げずに収まるなら inWindow:true のまま", () => {
-    const first = shapesWithLowestFret("C", 10)[0]!;
-    const result = succeeded(optimizeSymbols(["C", "C7(9,13)", "C"], { firstVoicing: first }));
-    expect(result.steps.map((step) => step.inWindow)).toEqual([true, false, true]);
-  });
-
-  it("開放弦とミュートだけの押さえ方を指定すると、窓をかけずに先頭だけ固定し、inWindow は全て true", () => {
-    const openOnly = v("0x0000"); // Em7
-    expect(validateVoicing(openOnly, chord("Em7"))).toEqual({ ok: true });
-    const result = succeeded(optimizeSymbols(["Em7", "C", "Am", "F"], { firstVoicing: openOnly }));
-    expect(result.steps[0]!.voicing).toEqual(openOnly);
-    expect(result.steps.map((step) => step.inWindow)).toEqual([true, true, true, true]);
-    // 窓があれば除かれてしまう、開放寄りの C が選ばれる。
-    expect(show(result.steps[1]!.voicing)).toBe("x32010");
-  });
-
-  it.each<[string, unknown]>([
-    ["別のコードの押さえ方", v("x02210")], // Am の押さえ方を C に
-    ["弦の数が違う", [3, 2, 0, 1, 0]],
-    ["フレットが負", [-1, 3, 2, 0, 1, 0]],
-    ["フレットが整数でない", [null, 3, 2, 0, 1, 0.5]],
-    ["フレットが NaN", [null, 3, 2, 0, 1, Number.NaN]],
-    ["配列でない", "x32010"],
-    ["null", null],
-  ])("妥当でない firstVoicing（%s）は invalid-first-voicing", (_name, firstVoicing) => {
-    expect(optimizeSymbols(["C", "Am"], { firstVoicing: firstVoicing as Voicing })).toEqual({
-      ok: false,
-      reason: "invalid-first-voicing",
+    it("同じ入力は毎回同じ結果（固定あり。性質）", () => {
+      fc.assert(
+        fc.property(fc.array(chordSymbols, { minLength: 1, maxLength: 5 }), fc.nat(), fc.nat(), (list, position, pick) => {
+          const at = position % list.length;
+          const candidates = generateVoicings(chord(list[at]!));
+          const options = { pins: new Map([[at, candidates[pick % candidates.length]!]]) };
+          expect(optimizeSymbols(list, options)).toEqual(optimizeSymbols(list, options));
+        }),
+        { numRuns: 20 },
+      );
     });
   });
 
-  it("既存の失敗を先に判定する。firstVoicing が不正でも、空・多すぎ・読めない記号はその失敗を返す", () => {
-    const bad = v("x02210") as Voicing;
-    expect(optimizeSymbols([], { firstVoicing: bad })).toEqual({ ok: false, reason: "empty" });
-    expect(optimizeSymbols(Array(MAX_PROGRESSION_CHORDS + 1).fill("C"), { firstVoicing: bad })).toEqual({
-      ok: false,
-      reason: "too-many-chords",
+  describe("不正な固定は invalid-pinned-voicing", () => {
+    const fail = (index: number) => ({ ok: false, reason: "invalid-pinned-voicing", index });
+    const cShape = v("x32010"); // C の押さえ方
+
+    it.each<[string, unknown]>([
+      ["別のコードの押さえ方", cShape], // C の形を Am に
+      ["弦の数が違う", [0, 2, 2, 1, 0]],
+      ["フレットが負", [-1, 0, 2, 2, 1, 0]],
+      ["フレットが整数でない", [null, 0, 2, 2, 1, 0.5]],
+      ["フレットが NaN", [null, 0, 2, 2, 1, Number.NaN]],
+      ["配列でない", "x02210"],
+      ["null", null],
+    ])("固定した形が、そのコードを満たさない（%s）なら、その位置（0 始まり）を返す", (_name, voicing) => {
+      expect(optimizeSymbols(["C", "Am"], { pins: new Map([[1, voicing as Voicing]]) })).toEqual(fail(1));
     });
-    expect(optimizeSymbols(["C", "H"], { firstVoicing: bad })).toEqual({
-      ok: false,
-      reason: "invalid-chords",
-      chords: [{ index: 1, symbol: "H", reason: "invalid-root" }],
+
+    it.each<[string, number]>([
+      ["負", -1],
+      ["進行の長さ以上", 2],
+      ["整数でない", 1.5],
+      ["NaN", Number.NaN],
+    ])("位置が%sなら、その値そのまま返す", (_name, position) => {
+      expect(optimizeSymbols(["C", "Am"], { pins: new Map([[position, cShape]]) })).toEqual(fail(position));
     });
-    expect(optimizeProgression("C".repeat(MAX_PROGRESSION_LENGTH + 1), { firstVoicing: bad })).toEqual({
-      ok: false,
-      reason: "too-long",
+
+    it("不正が複数あれば、整数でない位置を渡された順に、次に整数の位置を小さい順に調べ、最初のものを返す", () => {
+      const run = (...positions: number[]) =>
+        optimizeSymbols(CAMFG, { pins: new Map(positions.map((p) => [p, cShape] as [number, Voicing])) }); // C の形は Am・F・G に合わない
+      expect(run(3, 1)).toEqual(fail(1)); // 整数は小さい順
+      expect(run(5, 2, 1.5)).toEqual(fail(1.5)); // 整数でない位置が先
+      expect(run(5, 2.5, Number.NaN, 1.5)).toEqual(fail(2.5)); // 整数でない位置は渡された順
+      expect(run(5, -1)).toEqual(fail(-1));
     });
-  });
 
-  it("candidateIndex は、窓で絞ったあとも generateVoicings の結果全体の中の位置（性質）", () => {
-    fc.assert(
-      fc.property(fc.array(chordSymbols, { minLength: 1, maxLength: 6 }), fc.nat(), (list, pick) => {
-        const firstCandidates = generateVoicings(chord(list[0]!));
-        const first = firstCandidates[pick % firstCandidates.length]!;
-        const result = succeeded(optimizeSymbols(list, { firstVoicing: first }));
-        result.steps.forEach((step) => {
-          expect(step.voicing).toEqual(generateVoicings(chord(step.symbol))[step.candidateIndex]);
-        });
-      }),
-      { numRuns: 30 },
-    );
-  });
+    it("既存の失敗を先に判定する。固定が不正でも、空・多すぎ・読めない記号・長すぎはその失敗を返す", () => {
+      const options = { pins: new Map([[0, v("x02210")]]) };
+      expect(optimizeSymbols([], options)).toEqual({ ok: false, reason: "empty" });
+      expect(optimizeSymbols(Array(MAX_PROGRESSION_CHORDS + 1).fill("C"), options)).toEqual({
+        ok: false,
+        reason: "too-many-chords",
+      });
+      expect(optimizeSymbols(["C", "H"], options)).toEqual({
+        ok: false,
+        reason: "invalid-chords",
+        chords: [{ index: 1, symbol: "H", reason: "invalid-root" }],
+      });
+      expect(optimizeProgression("C".repeat(MAX_PROGRESSION_LENGTH + 1), options)).toEqual({
+        ok: false,
+        reason: "too-long",
+      });
+    });
 
-  it("optimizeProgression でも同じ指定ができ、optimizeSymbols と同じ結果になる", () => {
-    const options = { firstVoicing: barreAt8 };
-    expect(optimizeProgression("C Am | F G", options)).toEqual(
-      optimizeSymbols(splitProgression("C Am | F G"), options),
-    );
-  });
-
-  it("同じ入力は毎回同じ結果（firstVoicing あり。性質）", () => {
-    fc.assert(
-      fc.property(fc.array(chordSymbols, { minLength: 1, maxLength: 5 }), fc.nat(), (list, pick) => {
-        const firstCandidates = generateVoicings(chord(list[0]!));
-        const options = { firstVoicing: firstCandidates[pick % firstCandidates.length]! };
-        expect(optimizeSymbols(list, options)).toEqual(optimizeSymbols(list, options));
-      }),
-      { numRuns: 20 },
-    );
-  });
-
-  it("options が無い、または firstVoicing が無いときは、結果は変わらず inWindow も付かない", () => {
-    const plain = succeeded(optimizeSymbols(["C", "Am", "F", "G"]));
-    expect(plain.steps.map((step) => show(step.voicing))).toEqual(["x32010", "x02210", "133211", "320003"]);
-    for (const step of plain.steps) expect("inWindow" in step).toBe(false);
-    expect(optimizeSymbols(["C", "Am", "F", "G"], {})).toEqual(plain);
+    it("optimizeProgression でも同じ指定ができ、optimizeSymbols と同じ結果になる（成功・不正な固定とも）", () => {
+      const ok = { pins: new Map([[0, barreAt8]]) };
+      expect(optimizeProgression("C Am | F G", ok)).toEqual(optimizeSymbols(splitProgression("C Am | F G"), ok));
+      const bad = { pins: new Map([[1, barreAt8]]) };
+      expect(optimizeProgression("C Am | F G", bad)).toEqual(fail(1));
+      expect(optimizeProgression("C Am | F G", bad)).toEqual(optimizeSymbols(splitProgression("C Am | F G"), bad));
+    });
   });
 });

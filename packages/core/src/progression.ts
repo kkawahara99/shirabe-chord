@@ -20,25 +20,32 @@ export type ProgressionStep = {
   /** `generateVoicings` の結果の中での位置。モード 2 で候補から選び直すときに使う。 */
   readonly candidateIndex: number;
   /**
-   * 最初の押さえ方の窓に、広げずに収まったか。`firstVoicing` を指定したときだけ付く。
-   * `false` は、窓に収まる候補が無く、窓を広げて選んだコード（ADR 0021）。
+   * 手の位置の窓に、広げずに収まったか。`pins` が 1 つでもあるときだけ、全ステップに付く。
+   * 固定したコードは常に `true`。`false` は、窓に収まる候補が無く、窓を広げて選んだコード（ADR 0021・0032）。
    */
   readonly inWindow?: boolean;
 };
 
 export type OptimizeOptions = {
   /**
-   * 最初のコードの押さえ方。指定すると、先頭はこの押さえ方に固定し、続くコードは最低フレットから
-   * 5 フレット分の窓に収まる押さえ方から選ぶ（ADR 0021）。
+   * 固定するコード。進行の位置（0 始まり）→ 押さえ方。固定したコードはその押さえ方だけを候補にし、
+   * 残りは、押さえるフレットがある固定のうち先頭に最も近いものの最低フレットから 5 フレット分の窓に
+   * 収まる押さえ方から選ぶ（ADR 0021・0032）。
    */
-  readonly firstVoicing?: Voicing;
+  readonly pins?: ReadonlyMap<number, Voicing>;
 };
 
 export type OptimizeProgressionResult =
   | { readonly ok: true; readonly steps: readonly ProgressionStep[]; readonly totalCost: number }
   | {
       readonly ok: false;
-      readonly reason: "empty" | "too-long" | "too-many-chords" | "invalid-first-voicing";
+      readonly reason: "empty" | "too-long" | "too-many-chords";
+    }
+  | {
+      readonly ok: false;
+      readonly reason: "invalid-pinned-voicing";
+      /** 最初に見つかった不正な固定の位置（0 始まり）。整数でない位置は、渡された値そのまま。 */
+      readonly index: number;
     }
   | {
       readonly ok: false;
@@ -113,36 +120,46 @@ export function optimizeSymbols(
   );
   let inWindow: boolean[] | undefined;
 
-  const firstVoicing = options?.firstVoicing;
-  if (firstVoicing !== undefined) {
-    // 読めない記号は上で返したので、先頭の記号は読める。
-    const parsedFirst = parseChord(symbols[0]!);
-    const firstIndex =
-      parsedFirst.ok && validateVoicing(firstVoicing, parsedFirst).ok
-        ? layers[0]!.findIndex((candidate) => sameVoicing(candidate.voicing, firstVoicing))
-        : -1;
-    if (firstIndex === -1) return { ok: false, reason: "invalid-first-voicing" };
+  const pins = options?.pins;
+  if (pins !== undefined && pins.size > 0) {
+    // 整数でない位置を渡された順に、次に整数の位置を小さい順に調べる。
+    const positions = [...pins.keys()];
+    const pinned = positions.filter(Number.isInteger).sort((a, b) => a - b);
+    const fixedIndex = new Map<number, number>();
+    for (const position of [...positions.filter((p) => !Number.isInteger(p)), ...pinned]) {
+      const voicing = pins.get(position)!;
+      // 読めない記号は上で返したので、範囲内の位置の記号は読める。
+      const parsed = Number.isInteger(position) && position >= 0 && position < symbols.length ? parseChord(symbols[position]!) : undefined;
+      const index =
+        parsed?.ok && validateVoicing(voicing, parsed).ok
+          ? layers[position]!.findIndex((candidate) => sameVoicing(candidate.voicing, voicing))
+          : -1;
+      if (index === -1) return { ok: false, reason: "invalid-pinned-voicing", index: position };
+      fixedIndex.set(position, index);
+    }
 
+    // 窓は 1 つだけ。押さえるフレットがある固定のうち、先頭に最も近いものから決める（ADR 0032）。
+    const basis = pinned
+      .map((position) => lowestPressedFret(pins.get(position)!))
+      .find((lowest) => lowest !== undefined);
     const flags = layers.map(() => true);
     inWindow = flags;
-    entries[0] = [entries[0]![firstIndex]!];
-    const lowest = lowestPressedFret(firstVoicing);
-    // 押さえるフレットが無い押さえ方には、窓をかけない。
-    if (lowest !== undefined) {
-      entries = entries.map((layer, i) => {
-        if (i === 0) return layer;
-        // 窓に候補が無ければ、下限を 1 下げ（1 まで）、上限を 1 上げる。
-        for (let widen = 0; ; widen++) {
-          const low = Math.max(1, lowest - widen);
-          const high = lowest + WINDOW_SIZE - 1 + widen;
-          const fitting = layer.filter((entry) => fitsWindow(entry.scored.voicing, low, high));
-          if (fitting.length > 0) {
-            flags[i] = widen === 0;
-            return fitting;
-          }
+    entries = entries.map((layer, i) => {
+      const fixed = fixedIndex.get(i);
+      if (fixed !== undefined) return [layer[fixed]!];
+      // 窓をかけない（押さえるフレットがある固定が無い）。
+      if (basis === undefined) return layer;
+      // 窓に候補が無ければ、下限を 1 下げ（1 まで）、上限を 1 上げる。
+      for (let widen = 0; ; widen++) {
+        const low = Math.max(1, basis - widen);
+        const high = basis + WINDOW_SIZE - 1 + widen;
+        const fitting = layer.filter((entry) => fitsWindow(entry.scored.voicing, low, high));
+        if (fitting.length > 0) {
+          flags[i] = widen === 0;
+          return fitting;
         }
-      });
-    }
+      }
+    });
   }
 
   const path = selectCheapestPath(

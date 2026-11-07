@@ -78,7 +78,7 @@ function failureMessages(
     case "too-long":
     case "too-many-chords":
       return [`コードが多すぎます（${MAX_PROGRESSION_CHORDS}個まで）`];
-    case "invalid-first-voicing":
+    case "invalid-pinned-voicing":
       return ["最初のコードの押さえ方が合っていません"];
     case "invalid-chords":
       return result.chords.map((chord) => describeInvalidChord(chord, played));
@@ -270,7 +270,7 @@ export function App() {
   const shapeJoined = shapeSymbols.join(" ");
   const shapes = useMemo(() => listShapesByLowestFret(shapeSymbols[0]!), [shapeSymbols[0]]); // eslint-disable-line react-hooks/exhaustive-deps -- 先頭の記号が同じなら計算し直さない
   const result = useMemo(
-    () => optimizeSymbols(shapeSymbols, picked ? { firstVoicing: picked.voicing } : undefined),
+    () => optimizeSymbols(shapeSymbols, picked ? { pins: new Map([[0, picked.voicing]]) } : undefined),
     [shapeJoined, picked], // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
   );
 
