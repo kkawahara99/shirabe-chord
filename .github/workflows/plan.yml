@@ -1,0 +1,50 @@
+# PR で terraform plan を流す。apply はしない（反映は main へのマージ後に deploy.yml が行う）。
+# plan の出力にはアカウントIDの入ったバケット名が出うるので、ジョブのログにだけ出し、PR のコメントやサマリーには載せない。
+# 守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md
+name: plan
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # 伏せ字（mask-aws-account-id）はジョブ単位で効くので、AWS に入る手順は 1 つのジョブにまとめる
+  plan:
+    # fork の PR は動かさない（Secrets が渡らず、信頼できないコードでもあるため）
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ラッパーは標準出力に行を足す
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: terraform plan
+        working-directory: infra/app
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION"
+          terraform plan -input=false -lock-timeout=5m -no-color -var="region=$AWS_REGION"
