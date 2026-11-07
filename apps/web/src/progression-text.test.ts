@@ -45,4 +45,18 @@ describe("progressionText（押さえ方をコピーするテキスト）", () =
       lines.slice(1).forEach((line, i) => expect(line.startsWith(`${i + 1}. `)).toBe(true));
     }
   });
+
+  it("カポを渡すと、先頭に「カポ：N」の行が付き、各行の記号の後に「（Xの形）」が付く。記号は鳴らす名前", () => {
+    const steps = stepsOf(["G", "C"]);
+    const lines = progressionText(null, steps, { fret: 3, played: ["Bb", "Eb"] }).split("\n");
+    expect(lines[0]).toBe("カポ：3");
+    expect(lines[1]).toBe("手の位置：おまかせ");
+    expect(lines[2]).toMatch(/^1\. B♭ （Gの形）  /);
+    expect(lines[3]).toMatch(/^2\. E♭ （Cの形）  /);
+  });
+
+  it("カポを渡さないときは、カポ導入の前と同じテキストになる", () => {
+    const steps = stepsOf(["C", "Am"]);
+    expect(progressionText(null, steps, undefined)).toBe(progressionText(null, steps));
+  });
 });

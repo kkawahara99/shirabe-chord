@@ -1,8 +1,8 @@
-import { listShapesByLowestFret, optimizeSymbols } from "@shirabe-chord/core";
+import { listShapesByLowestFret, optimizeSymbols, rootStrings } from "@shirabe-chord/core";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.tsx";
-import { voicingLabel } from "./voicing-diagram.tsx";
+import { voicingFrets, voicingLabel } from "./voicing-diagram.tsx";
 
 const rawSources = import.meta.glob(["./**/*.{ts,tsx}", "!./**/*.test.{ts,tsx}"], {
   query: "?raw",
@@ -940,5 +940,147 @@ describe("印刷とコピー", () => {
     toggle("#11");
     expect(printButton().disabled).toBe(false);
     expect(copyButton().disabled).toBe(false);
+  });
+});
+
+describe("カポ", () => {
+  const capoSelect = () => screen.getByRole("combobox", { name: "カポ" }) as HTMLSelectElement;
+  const setCapo = (n: number) => fireEvent.change(capoSelect(), { target: { value: String(n) } });
+  const capoNote = (n: number) => screen.queryByText(`カポ${n}`);
+  const shapeNotes = () => Array.from(document.querySelectorAll(".step-shape")).map((e) => e.textContent);
+  /** B♭ E♭ F B♭ にする（初期の C Am F G7 の 1・2・4 番目を変える）。 */
+  const toBbEbFBb = () => {
+    select(0);
+    pick("根音の変化記号", "♭");
+    pick("根音の音名", "B");
+    select(1);
+    pick("根音の変化記号", "♭");
+    pick("根音の音名", "E");
+    pick("種類", "M");
+    select(3);
+    pick("根音の変化記号", "♭");
+    pick("根音の音名", "B");
+    pick("種類", "M");
+    expect(chordSymbols()).toEqual(["Bb", "Eb", "F", "Bb"]);
+  };
+  const SHAPE_SYMBOLS = ["G", "C", "D", "G"];
+
+  it("ヘッダーに「カポ」の選択欄があり、選択肢は「なし」と 1〜7、初めは「なし」", () => {
+    render(<App />);
+    const header = document.querySelector("header")!;
+    expect(within(header).getByRole("combobox", { name: "カポ" })).toBe(capoSelect());
+    expect(Array.from(capoSelect().options).map((o) => o.textContent)).toEqual(["なし", "1", "2", "3", "4", "5", "6", "7"]);
+    expect(capoSelect().selectedOptions[0]!.textContent).toBe("なし");
+  });
+
+  it("カポなしのとき、「〜の形」も「カポN」の行も出ない", () => {
+    render(<App />);
+    expect(shapeNotes()).toEqual([]);
+    expect(screen.queryByText(/^カポ\d$/)).toBeNull();
+    setCapo(3);
+    expect(capoNote(3)).not.toBeNull();
+    setCapo(0);
+    expect(shapeNotes()).toEqual([]);
+    expect(screen.queryByText(/^カポ\d$/)).toBeNull();
+  });
+
+  it("カポなしでは、D♭ のようなつづりも変わらない（図の読み上げ名・押さえ方の候補の図も D♭ のまま）", () => {
+    render(<App />);
+    pick("根音の変化記号", "♭");
+    pick("根音の音名", "D");
+    expect(chordSymbols()[0]).toBe("Db");
+    expect(resultLabels()[0]).toMatch(/^D♭: /);
+    cards();
+    const picker = within(screen.getByRole("group", { name: PICKER }));
+    expect(picker.getAllByRole("img").every((img) => img.getAttribute("aria-label")?.startsWith("D♭: "))).toBe(true);
+  });
+
+  it("カポ3で B♭ E♭ F B♭ にすると、押さえ方は G C D G のおまかせと同じで、カードは鳴らす名前のまま「Gの形」などが出る。図の読み上げ名は形の記号", () => {
+    render(<App />);
+    toBbEbFBb();
+    setCapo(3);
+    expect(resultLabels()).toEqual(expectedLabels(SHAPE_SYMBOLS));
+    expect(resultLabels().map((l) => l?.split(":")[0])).toEqual(["G", "C", "D", "G"]);
+    expect(chordTexts()).toEqual(["B♭", "E♭", "F", "B♭"]);
+    expect(chordSymbols()).toEqual(["Bb", "Eb", "F", "Bb"]);
+    expect(shapeNotes()).toEqual(["Gの形", "Cの形", "Dの形", "Gの形"]);
+  });
+
+  it("カポありのとき、譜面の領域に「カポ3」の行が 1 つだけ出る", () => {
+    render(<App />);
+    setCapo(3);
+    const region = screen.getByRole("region", { name: "進行の押さえ方" });
+    expect(within(region).getAllByText("カポ3")).toHaveLength(1);
+    setCapo(5);
+    expect(capoNote(3)).toBeNull();
+    expect(within(region).getAllByText("カポ5")).toHaveLength(1);
+  });
+
+  it("押さえ方の候補・手の位置・ルートの印は形の記号で作る（カポ3＋先頭 B♭ → G の候補と同じ数、ルートの印は G の弦）", () => {
+    render(<App />);
+    toBbEbFBb();
+    setCapo(3);
+    select(0);
+    const shapes = firstShapes("G");
+    expect(cards()).toHaveLength(shapes.length);
+    fireEvent.click(within(cards()[1]!).getByRole("button", { name: `第${shapes[1]!.lowestFret}ポジション` }));
+    expect(handButton().textContent).toBe(`手の位置：第${shapes[1]!.lowestFret}ポジション`);
+    expect(resultLabels()).toEqual(expectedLabels(SHAPE_SYMBOLS, 1));
+    const first = diagrams()[0]!;
+    const rootMarks = Array.from(first.querySelectorAll('[data-root="true"][data-string]')).map((e) => Number(e.getAttribute("data-string")));
+    expect([...new Set(rootMarks)].sort()).toEqual([...rootStrings("G", shapes[1]!.voicing)].sort());
+  });
+
+  it("押さえ方を選んだあとでカポを変えると「おまかせ」に戻り、失敗の文は出ない", () => {
+    render(<App />);
+    fireEvent.click(cardButton(1));
+    expect(cardPressed()[1]).toBe("true");
+    setCapo(3);
+    expect(alert()).toBeNull();
+    expect(autoButton().getAttribute("aria-pressed")).toBe("true");
+    expect(resultLabels()).toEqual(expectedLabels(["A", "F#m", "D", "E7"]));
+  });
+
+  it("カポ7でも、押さえ方が全コードに出る", () => {
+    render(<App />);
+    setCapo(7);
+    expect(alert()).toBeNull();
+    expect(diagrams()).toHaveLength(4);
+    expect(resultLabels()).toEqual(expectedLabels(["F", "Dm", "Bb", "C7"]));
+  });
+
+  it("カポの数は保存しない（描画し直すと「なし」に戻る）", () => {
+    const { unmount } = render(<App />);
+    setCapo(4);
+    unmount();
+    render(<App />);
+    expect(capoSelect().value).toBe("0");
+  });
+
+  it("コピーは、カポありのとき先頭に「カポ：3」、各行の記号の後に「（Gの形）」が付く。カポを変えると前のコピー結果の文は消える", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    try {
+      render(<App />);
+      toBbEbFBb();
+      setCapo(3);
+      fireEvent.click(screen.getByRole("button", { name: "テキストでコピー" }));
+      await act(async () => {});
+      const result = optimizeSymbols(SHAPE_SYMBOLS);
+      if (!result.ok) throw new Error("optimize");
+      const names = ["B♭", "E♭", "F", "B♭"];
+      expect(writeText).toHaveBeenCalledWith(
+        [
+          "カポ：3",
+          "手の位置：おまかせ",
+          ...result.steps.map((s, i) => `${i + 1}. ${names[i]} （${SHAPE_SYMBOLS[i]}の形）  ${voicingFrets(s.voicing)}`),
+        ].join("\n"),
+      );
+      expect(screen.getByRole("status").textContent).toBe("コピーしました");
+      setCapo(2);
+      expect(screen.getByRole("status").textContent).toBe("");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 });
