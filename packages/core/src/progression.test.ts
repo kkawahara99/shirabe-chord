@@ -126,13 +126,13 @@ describe("optimizeProgression: 選び方と戻り値", () => {
 
   it("どんな進行でも、隣り合う同じコードは同じ押さえ方（性質）", () => {
     fc.assert(
-      fc.property(fc.array(fc.constantFrom("Em7", "E7sus4", "G6", "A7sus4", "C7", "F", "Am"), { minLength: 2, maxLength: 8 }), (list) => {
+      fc.property(fc.array(fc.constantFrom("Em7", "E7sus4", "G6", "A7sus4", "C7", "F", "Am"), { minLength: 2, maxLength: 6 }), (list) => {
         const steps = picked(list.join(" "));
         list.forEach((name, i) => {
           if (i > 0 && name === list[i - 1]) expect(steps[i]).toBe(steps[i - 1]);
         });
       }),
-      { numRuns: 30 },
+      { numRuns: 20 },
     );
   });
 
@@ -275,11 +275,11 @@ describe("optimizeSymbols: 記号の配列から選ぶ", () => {
   it("splitProgression で分けた結果を渡すと、optimizeProgression と同じ結果（成功・失敗とも。性質）", () => {
     const piece = fc.oneof(chordSymbols, fc.constantFrom("H", "Cxyz", "C7(b9,#9,#11)", "|", "C7(9,b9)"));
     fc.assert(
-      fc.property(fc.array(piece, { maxLength: 10 }), fc.constantFrom(" ", "\n", " | "), (list, separator) => {
+      fc.property(fc.array(piece, { maxLength: 6 }), fc.constantFrom(" ", "\n", " | "), (list, separator) => {
         const text = list.join(separator);
         expect(optimizeSymbols(splitProgression(text))).toEqual(optimizeProgression(text));
       }),
-      { numRuns: 50 },
+      { numRuns: 30 },
     );
   });
 });

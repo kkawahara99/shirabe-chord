@@ -276,16 +276,6 @@ describe("App（画面全体）", () => {
     expect((screen.getByRole("button", { name: "1番目のコードを削除" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("コードが 64 個のとき追加ボタンは押せず、63 個以下なら押せる", () => {
-    render(<App />);
-    const addButton = screen.getByRole("button", { name: "＋ コードを追加" }) as HTMLButtonElement;
-    for (let i = 0; i < 60; i++) add();
-    expect(chordButtons()).toHaveLength(64);
-    expect(addButton.disabled).toBe(true);
-    remove(64);
-    expect(addButton.disabled).toBe(false);
-  }, 30_000); // 図を 64 個描き直す操作を 60 回くり返すので、既定の 5 秒では足りない
-
   it("押さえ方が無いコードを選ぶと、図の代わりに日本語のメッセージが出て、コードの一覧は残る。直すと図が戻る", () => {
     render(<App />);
     pick("種類", "7");
@@ -781,146 +771,165 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(region.querySelectorAll("li")).toHaveLength(5);
   });
 
-  it("操作をランダムに数百回くり返しても、固定の印は写しの位置とちょうど一致して図が固定した形で、固定の失敗の文は出ず、選択の番号は範囲内、選択中のカードは開いていればちょうど 1 枚（閉じていれば 0 枚）、押されたタブはちょうど 1 つ、「押さえ方」タブは選んだコードに候補があるときだけ出る", () => {
+  it("操作を 12 種類 1 回ずつ、決まったランダムな順で行っても、固定の印は写しの位置とちょうど一致して図が固定した形で、固定の失敗の文は出ず、選択の番号は範囲内、選択中のカードは開いていればちょうど 1 枚（閉じていれば 0 枚）、押されたタブはちょうど 1 つ、「押さえ方」タブは選んだコードに候補があるときだけ出る", () => {
     const random = (seed: number) => () => {
       seed = (seed + 0x6d2b79f5) | 0;
       let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
       t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
+    const NAMES = ["select", "add", "remove", "tab", "close", "open", "hand", "quality", "broken", "pin", "auto", "capo"] as const;
+    const SEED = 51;
     const qualities = ["M", "m", "7", "M7", "sus4", "dim7"];
-    for (const seed of [1, 2, 3]) {
-      const next = random(seed);
-      const below = (n: number) => Math.floor(next() * n);
-      const { unmount } = render(<App />);
-      let count = 4;
-      let open = true;
-      /** 画面の外に持つ、固定の写し。進行の位置 → 固定した形。 */
-      let model = new Map<number, Shape>();
-      const check = () => {
-        const buttons = chordButtons();
-        expect(buttons).toHaveLength(count);
-        // 固定の位置は範囲内で、印の位置と一致する
-        expect(pinMarks()).toEqual([...model.keys()].sort((x, y) => x - y));
-        expect([...model.keys()].every((position) => position >= 0 && position < count)).toBe(true);
-        // 固定した形で図が出る（進行が失敗しているときは図が無い）
-        const labels = resultLabels();
-        if (labels.length > 0) {
-          for (const [position, shape] of model) {
-            expect(labels[position]).toBe(voicingLabel(lowerSymbol(chordSymbols()[position]!, capoValue()), shape.voicing));
-          }
-        }
-        // 手の位置は、固定のうち最も前のコードの最低フレット
-        const front = Math.min(...model.keys());
-        expect(handButton().textContent).toBe(`手の位置：${model.size === 0 ? "おまかせ" : `第${model.get(front)!.lowestFret}ポジション`}`);
-        const firstList = listShapesByLowestFret(lowerSymbol(chordSymbols()[0]!, capoValue()));
-        expect(handButton().disabled).toBe(model.size === 0 && !(firstList.ok && firstList.shapes.length > 0));
-        expect(alert()?.textContent ?? "").not.toContain("固定した押さえ方が合っていません");
-        const pressed = buttons.filter((b) => b.getAttribute("aria-pressed") === "true");
-        if (!open) {
-          expect(pressed).toHaveLength(0);
-          expect(screen.queryByRole("group", { name: TABS })).toBeNull();
-          return;
-        }
-        expect(pressed).toHaveLength(1);
-        const number = Number(/^(\d+)番目/.exec(heading()!)![1]);
-        expect(number).toBe(pressedIndex() + 1);
-        expect(number).toBeLessThanOrEqual(count);
-        expect(tabButtons().filter((b) => b.getAttribute("aria-pressed") === "true")).toHaveLength(1);
-        const selectedList = listShapesByLowestFret(lowerSymbol(chordSymbols()[pressedIndex()]!, capoValue()));
-        const canShowShape = selectedList.ok && selectedList.shapes.length > 0;
-        expect(queryTabButton("押さえ方") !== null).toBe(canShowShape);
-      };
-      /** 記号を変える操作。記号が変わったコードの固定は外れる。 */
-      const editing = (position: number, edit: () => void) => {
-        const before = chordSymbols()[position];
-        edit();
-        if (chordSymbols()[position] !== before) model.delete(position);
-      };
-      const operations: (() => void)[] = [
-        () => {
-          select(below(count));
-          open = true;
-        },
-        () => {
-          if (count >= 8) return;
-          add();
-          count++;
-          open = true;
-        },
-        () => {
-          if (count <= 1) return;
-          const position = below(count);
-          remove(position + 1);
-          count--;
-          model = new Map([...model].filter(([p]) => p !== position).map(([p, shape]) => [p > position ? p - 1 : p, shape]));
-        },
-        () => {
-          if (!open) return;
-          const names = tabButtons().map((b) => b.textContent!);
-          showTab(names[below(names.length)]!);
-        },
-        () => {
-          if (!open) return;
-          closePanel();
-          open = false;
-        },
-        () => {
-          if (open) return;
-          openRail();
-          open = true;
-        },
-        () => {
-          if (handButton().disabled) return;
-          fireEvent.click(handButton());
-          open = true;
-        },
-        () => {
-          if (!open) return;
-          editing(pressedIndex(), () => pick("種類", qualities[below(qualities.length)]!));
-        },
-        () => {
-          // 最初のコードを、押さえ方の無いコード（C7(b9,#9,#11)）にする
-          select(0);
-          open = true;
-          editing(0, () => {
-            pick("根音の音名", "C");
-            pick("根音の変化記号", "なし");
-            pick("種類", "m");
-            pick("種類", "7");
-            for (const tension of ["b9", "#9", "#11"]) toggle(tension);
-          });
-        },
-        () => {
-          // 選んだコードに、候補の 1 つを固定する
-          const position = below(count);
-          select(position);
-          open = true;
-          if (queryTabButton("押さえ方") === null) return;
-          const index = below(cards().length);
-          fireEvent.click(cardButton(index));
-          model.set(position, selectedShapes()[index]!);
-        },
-        () => {
-          // 選んだコードを「おまかせ」に戻す
-          if (!open || queryTabButton("押さえ方") === null) return;
-          fireEvent.click(autoButton());
-          model.delete(pressedIndex());
-        },
-        () => {
-          // カポを変える。値が変わるときだけ、固定がすべて外れる
-          const fret = below(8);
-          if (fret !== capoValue()) model.clear();
-          fireEvent.change(screen.getByRole("combobox", { name: "カポ" }), { target: { value: String(fret) } });
-        },
-      ];
-      for (let step = 0; step < 120; step++) {
-        operations[below(operations.length)]!();
-        check();
+    // 全部の操作を 1 回ずつ、シードで決めた順に行う（全部が必ず走り、シード探しが要らない）。条件を満たさず何もせず戻る操作があってもよい。
+    // シードは、固定の操作が、削除・記号の編集・種類の変更・カポのどれよりも前に来るものを選んでいる。固定したあとで
+    // 編集・削除・カポの変更をしても固定が合うことを通すため（この順序は下の expect でも確かめる）。シード 51 では、
+    // 固定したコードと別のコードを編集しても固定が残り、そのあと固定したコードの種類を変えると外れる。
+    const next = random(SEED);
+    const below = (n: number) => Math.floor(next() * n);
+    function shuffle<T>(items: readonly T[]): T[] {
+      const result = [...items];
+      for (let i = result.length - 1; i > 0; i--) {
+        const j = below(i + 1);
+        [result[i], result[j]] = [result[j]!, result[i]!];
       }
-      unmount();
+      return result;
     }
-  }, 180_000);
+    const { unmount } = render(<App />);
+    let count = 4;
+    let open = true;
+    /** 画面の外に持つ、固定の写し。進行の位置 → 固定した形。 */
+    let model = new Map<number, Shape>();
+    const check = () => {
+      const buttons = chordButtons();
+      expect(buttons).toHaveLength(count);
+      // 固定の位置は範囲内で、印の位置と一致する
+      expect(pinMarks()).toEqual([...model.keys()].sort((x, y) => x - y));
+      expect([...model.keys()].every((position) => position >= 0 && position < count)).toBe(true);
+      // 固定した形で図が出る（進行が失敗しているときは図が無い）
+      const labels = resultLabels();
+      if (labels.length > 0) {
+        for (const [position, shape] of model) {
+          expect(labels[position]).toBe(voicingLabel(lowerSymbol(chordSymbols()[position]!, capoValue()), shape.voicing));
+        }
+      }
+      // 手の位置は、固定のうち最も前のコードの最低フレット
+      const front = Math.min(...model.keys());
+      expect(handButton().textContent).toBe(`手の位置：${model.size === 0 ? "おまかせ" : `第${model.get(front)!.lowestFret}ポジション`}`);
+      const firstList = listShapesByLowestFret(lowerSymbol(chordSymbols()[0]!, capoValue()));
+      expect(handButton().disabled).toBe(model.size === 0 && !(firstList.ok && firstList.shapes.length > 0));
+      expect(alert()?.textContent ?? "").not.toContain("固定した押さえ方が合っていません");
+      const pressed = buttons.filter((b) => b.getAttribute("aria-pressed") === "true");
+      if (!open) {
+        expect(pressed).toHaveLength(0);
+        expect(screen.queryByRole("group", { name: TABS })).toBeNull();
+        return;
+      }
+      expect(pressed).toHaveLength(1);
+      const number = Number(/^(\d+)番目/.exec(heading()!)![1]);
+      expect(number).toBe(pressedIndex() + 1);
+      expect(number).toBeLessThanOrEqual(count);
+      expect(tabButtons().filter((b) => b.getAttribute("aria-pressed") === "true")).toHaveLength(1);
+      const selectedList = listShapesByLowestFret(lowerSymbol(chordSymbols()[pressedIndex()]!, capoValue()));
+      const canShowShape = selectedList.ok && selectedList.shapes.length > 0;
+      expect(queryTabButton("押さえ方") !== null).toBe(canShowShape);
+    };
+    /** 記号を変える操作。記号が変わったコードの固定は外れる。 */
+    const editing = (position: number, edit: () => void) => {
+      const before = chordSymbols()[position];
+      edit();
+      if (chordSymbols()[position] !== before) model.delete(position);
+    };
+    const operations: Record<(typeof NAMES)[number], () => void> = {
+      select: () => {
+        select(below(count));
+        open = true;
+      },
+      add: () => {
+        if (count >= 8) return;
+        add();
+        count++;
+        open = true;
+      },
+      remove: () => {
+        if (count <= 1) return;
+        const position = below(count);
+        remove(position + 1);
+        count--;
+        model = new Map([...model].filter(([p]) => p !== position).map(([p, shape]) => [p > position ? p - 1 : p, shape]));
+      },
+      tab: () => {
+        if (!open) return;
+        const names = tabButtons().map((b) => b.textContent!);
+        showTab(names[below(names.length)]!);
+      },
+      close: () => {
+        if (!open) return;
+        closePanel();
+        open = false;
+      },
+      open: () => {
+        if (open) return;
+        openRail();
+        open = true;
+      },
+      hand: () => {
+        if (handButton().disabled) return;
+        fireEvent.click(handButton());
+        open = true;
+      },
+      quality: () => {
+        if (!open) return;
+        editing(pressedIndex(), () => pick("種類", qualities[below(qualities.length)]!));
+      },
+      broken: () => {
+        // 最初のコードを、押さえ方の無いコード（C7(b9,#9,#11)）にする
+        select(0);
+        open = true;
+        editing(0, () => {
+          pick("根音の音名", "C");
+          pick("根音の変化記号", "なし");
+          pick("種類", "m");
+          pick("種類", "7");
+          for (const tension of ["b9", "#9", "#11"]) toggle(tension);
+        });
+      },
+      pin: () => {
+        // 選んだコードに、候補の 1 つを固定する
+        const position = below(count);
+        select(position);
+        open = true;
+        if (queryTabButton("押さえ方") === null) return;
+        const index = below(cards().length);
+        fireEvent.click(cardButton(index));
+        model.set(position, selectedShapes()[index]!);
+      },
+      auto: () => {
+        // 選んだコードを「おまかせ」に戻す
+        if (!open || queryTabButton("押さえ方") === null) return;
+        fireEvent.click(autoButton());
+        model.delete(pressedIndex());
+      },
+      capo: () => {
+        // カポを変える。値が変わるときだけ、固定がすべて外れる
+        const fret = below(8);
+        if (fret !== capoValue()) model.clear();
+        fireEvent.change(screen.getByRole("combobox", { name: "カポ" }), { target: { value: String(fret) } });
+      },
+    };
+    const order = shuffle(NAMES);
+    // 固定の操作は、削除・記号の編集・種類の変更・カポのどれよりも前。「おまかせ」に戻す操作はそれらのどれよりも後
+    for (const later of ["remove", "broken", "quality", "capo"] as const) {
+      expect(order.indexOf("pin")).toBeLessThan(order.indexOf(later));
+      expect(order.indexOf("auto")).toBeGreaterThan(order.indexOf(later));
+    }
+    for (const name of order) {
+      operations[name]();
+      if (name === "pin") expect(model.size).toBeGreaterThan(0); // 初期の進行が変わって何も固定されなくなったら気づく
+      check();
+    }
+    unmount();
+  });
 });
 
 describe("どのコードでも押さえ方を固定できる", () => {

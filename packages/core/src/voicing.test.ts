@@ -256,7 +256,7 @@ describe("generateVoicings", () => {
       const generated = new Set(generateVoicings(target).filter(inUniverse).map(key));
       const expected = exhaustive(target, options);
       expect([...generated].sort()).toEqual([...expected].sort());
-    }, 60_000);
+    });
   });
 
   describe("任意のコード記号", () => {
@@ -296,7 +296,7 @@ describe("generateVoicings", () => {
         }),
         { numRuns: 60 },
       );
-    }, 60_000);
+    });
   });
 });
 
