@@ -1,10 +1,16 @@
-# PR で terraform plan を流す。apply はしない（反映は main へのマージ後に deploy.yml が行う）。
+# infra/app を変える PR（plan.yml 自身の変更を含む）で terraform plan を流す。apply はしない（反映は main へのマージ後に deploy.yml が行う）。
 # plan の出力にはアカウントIDの入ったバケット名が出うるので、ジョブのログにだけ出し、PR のコメントやサマリーには載せない。
-# 守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md
+# 守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md と docs/adr/0031-skip-ci-by-path-without-required-checks.md
 name: plan
 
 on:
   pull_request:
+    paths: [infra/app/**, .github/workflows/plan.yml]
+
+# 同じ PR の plan は待ちを 1 つにまとめる。plan は状態ファイルのロックを持つので、途中では止めない（取り消さない）
+concurrency:
+  group: plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 permissions:
   contents: read

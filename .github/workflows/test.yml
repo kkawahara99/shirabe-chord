@@ -1,10 +1,20 @@
-# テスト。PR で動き、deploy.yml からも呼ばれる（main への push には付けない。二重に走らないため）。
-# AWS には入らない。守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md
+# テスト。PR（docs と *.md だけの変更を除く）で動き、deploy.yml からも呼ばれる（main への push には付けない。二重に走らないため）。
+# terraform ジョブは、PR では infra/ と test.yml の変更があるときだけ手順を流し、それ以外は手順を飛ばして成功にする。
+# AWS には入らない。守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md と docs/adr/0031-skip-ci-by-path-without-required-checks.md
 name: test
 
 on:
   pull_request:
+    paths-ignore:
+      - docs/**
+      - "**/*.md"
   workflow_call:
+
+# PR では新しい push で古い実行を取り消す。deploy.yml から呼ばれたときは run_id で実行ごとに別 group になり、
+# deploy の group と衝突しない（衝突すると呼び出し元の deploy が自分を取り消す）
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -24,18 +34,58 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
+          cache: pnpm
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
 
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - run: python -m unittest discover -s .github/tests
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # 判定で HEAD^1 と比べるため 2 つ分の履歴を取る（PR ではマージ結果のコミットが取れ、HEAD^1 が main 側）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      # PR 以外（deploy.yml 経由の push）では必ず true を出す。このステップには if を付けない
+      # （付けると main で Terraform の検査が黙って飛ぶ。test_workflows.py が守る）
+      - name: Terraform の検査が要るか判定する
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # grep -q を直接パイプでつなぐと、早く終わった grep のせいで git が落ち、pipefail で誤って false になる
+          # 名前の変更は検出せず（移動元も出す）、日本語のパスを引用符で囲まない
+          files=$(git -c core.quotePath=false diff --no-renames --name-only HEAD^1 HEAD)
+          if grep -Eq '^(infra/|\.github/workflows/test\.yml$)' <<< "$files"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # 版は手元と同じに固定する。ラッパーは標準出力に行を足すので切る（plan.yml・deploy.yml と同じ設定）
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      - if: steps.changed.outputs.run == 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
 
-      - name: terraform（infra/bootstrap と infra/app）
+      - if: steps.changed.outputs.run == 'true'
+        name: terraform（infra/bootstrap と infra/app）
         run: |
           set -euo pipefail
           for dir in infra/bootstrap infra/app; do
@@ -44,9 +94,3 @@ jobs:
             terraform -chdir="$dir" validate
             terraform -chdir="$dir" test
           done
-
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.14"
-
-      - run: python -m unittest discover -s .github/tests

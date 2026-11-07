@@ -143,10 +143,10 @@ def parse_triggers(text: str) -> dict[str, list[str]] | None:
 
 
 def branch_filters(body: list[str]) -> dict[str, list[str]]:
-    """イベントの設定から、branches・branches-ignore・tags・tags-ignore の値の一覧を返す。"""
+    """イベントの設定から、branches・tags・paths とそれぞれの -ignore の値の一覧を返す。"""
     filters: dict[str, list[str]] = {}
     for i, line in enumerate(body):
-        m = re.match(r"^\s*(branches|branches-ignore|tags|tags-ignore):\s*(.*?)\s*$", line)
+        m = re.match(r"^\s*(branches|branches-ignore|tags|tags-ignore|paths|paths-ignore):\s*(.*?)\s*$", line)
         if not m:
             continue
         value = re.sub(r"\s+#.*$", "", m.group(2))
@@ -399,6 +399,126 @@ def check_secrets_and_expressions(text: str) -> list[str]:
     return list(dict.fromkeys(violations))
 
 
+def unquote(value: str) -> str:
+    m = re.fullmatch(r"""(['"])(.*)\1""", value)
+    return m.group(2) if m else value
+
+
+def concurrency_settings(text: str) -> dict[str, str] | None:
+    """最上位の concurrency の group と cancel-in-progress の値（引用符を外したもの）。無ければ None。"""
+    found = top_level_block(text, "concurrency")
+    if found is None:
+        return None
+    inline, block = found
+    if inline:
+        raise WorkflowFormatError(f"concurrency: をブロックで書いていない（group と cancel-in-progress を 2 字下げて並べる）: {inline}")
+    settings: dict[str, str] = {}
+    for line in block:
+        if not is_content(line):
+            continue
+        m = re.match(r"^  (group|cancel-in-progress):[ \t]*(.*?)\s*$", line)
+        if not m:
+            raise WorkflowFormatError(f"concurrency: の中を読めない: {line!r}")
+        settings[m.group(1)] = unquote(re.sub(r"\s+#.*$", "", m.group(2)))
+    return settings
+
+
+def check_concurrency(name: str, text: str) -> list[str]:
+    """同時実行の決まり。deploy は止めない。test は固定の true で取り消さず deploy と別 group。plan は取り消さない。
+
+    deploy.yml から呼ばれた test が deploy の group に入って自分を取り消す、
+    実行中の apply や plan を途中で止めて状態ファイルのロックを残す、の 2 つを防ぐ。
+    """
+    try:
+        settings = concurrency_settings(text)
+    except WorkflowFormatError as e:
+        return [str(e)]
+    group = settings.get("group") if settings else None
+    cancel = settings.get("cancel-in-progress") if settings else None
+    violations = []
+    if name == "deploy.yml":
+        if settings is None:
+            return ["concurrency が無い"]
+        if group != "deploy":
+            violations.append(f"group は deploy のまま（見つかった: {group}）")
+        if cancel != "false":
+            violations.append(f"cancel-in-progress は false のまま（見つかった: {cancel}）")
+    elif name == "test.yml":
+        if cancel is not None and re.sub(r"^\$\{\{\s*|\s*\}\}$", "", cancel).lower() == "true":
+            violations.append("cancel-in-progress を固定の true にしている（deploy から呼ばれたときも取り消してしまう）")
+        if group == "deploy":
+            violations.append("group が deploy と同じ（呼び出し元の group に入って自分を取り消す）")
+    elif name == "plan.yml":
+        if cancel is not None and cancel != "false":
+            violations.append(f"cancel-in-progress は false 固定にする（plan は状態ファイルのロックを持つ。見つかった: {cancel}）")
+    return violations
+
+
+def check_plan_paths(text: str) -> list[str]:
+    """plan.yml 専用: pull_request の paths に infra/app/** がある（plan は infra/app しか見ない）。"""
+    try:
+        events = parse_triggers(text)
+    except WorkflowFormatError as e:
+        return [str(e)]
+    if not events or "pull_request" not in events:
+        return ["pull_request が無い"]
+    if "infra/app/**" not in branch_filters(events["pull_request"]).get("paths", []):
+        return ["pull_request の paths に infra/app/** が無い"]
+    return []
+
+
+TERRAFORM_JOB = "terraform"
+
+
+def split_steps(job_lines: list[str]) -> list[list[str]]:
+    """ジョブの `steps:` の下を、ステップごとの行に分ける。"""
+    steps: list[list[str]] = []
+    dash_indent: int | None = None
+    in_steps = False
+    for line in job_lines:
+        if not is_content(line):
+            if steps:
+                steps[-1].append(line)
+            continue
+        if re.match(r"^    steps:\s*(#.*)?$", line):
+            in_steps = True
+        elif in_steps and indent_of(line) <= 4:
+            in_steps = False
+        elif in_steps and re.match(r"^\s*- ", line) and dash_indent in (None, indent_of(line)):
+            dash_indent = indent_of(line)
+            steps.append([line])
+        elif in_steps and steps:
+            steps[-1].append(line)
+    return steps
+
+
+def check_terraform_judge(text: str) -> list[str]:
+    """test.yml 専用: terraform ジョブも、変更の判定ステップも、if で飛ばさない。
+
+    飛ばすと、main への push（deploy 経由）で Terraform の検査が黙って抜ける。
+    判定ステップは、ほかのステップの if が steps.<id>.outputs で参照している id のステップ。
+    """
+    lines = split_jobs(text).get(TERRAFORM_JOB)
+    if lines is None:
+        return [f"ジョブ {TERRAFORM_JOB} が無い"]
+    violations = []
+    if any(re.match(r"^    if:", line) for line in lines):
+        violations.append(f"ジョブ {TERRAFORM_JOB} に if がある（飛ばすのは手順の if だけにする）")
+    referenced = set(re.findall(r"steps\.([A-Za-z0-9_-]+)\.outputs", "\n".join(code_lines("\n".join(lines)))))
+    judges = 0
+    for step in split_steps(lines):
+        ids = {m.group(1) for line in step if (m := re.match(r"""^\s*(?:-\s+)?id:\s*["']?([A-Za-z0-9_-]+)""", line))}
+        if not ids & referenced:
+            continue
+        judges += 1
+        key_indent = indent_of(step[0]) + 2
+        if re.match(r"^\s*-\s+if:", step[0]) or any(re.match(rf"^ {{{key_indent}}}if:", line) for line in step[1:]):
+            violations.append("判定のステップに if がある（main で Terraform の検査が黙って飛ぶ）")
+    if not judges:
+        violations.append("判定のステップが無い（steps.<id>.outputs を参照するステップの id を持つもの）")
+    return violations
+
+
 def check_workflow_set(names: set[str]) -> list[str]:
     if names != set(ALLOWED_TRIGGERS):
         return [f"ワークフローは {sorted(ALLOWED_TRIGGERS)} の 3 本ちょうど（見つかった: {sorted(names)}）"]
@@ -418,8 +538,12 @@ def check_workflow(name: str, text: str) -> list[str]:
     }
     if not results["job_layout"]:
         results["id_token"] = check_id_token(name, text)
+        results["concurrency"] = check_concurrency(name, text)
     if name == "plan.yml":
         results["plan_output"] = check_plan_output(text)
+        results["plan_paths"] = check_plan_paths(text)
+    if name == "test.yml" and not results["job_layout"]:
+        results["terraform_judge"] = check_terraform_judge(text)
     return [f"[{kind}] {v}" for kind, vs in results.items() for v in vs]
 
 
@@ -475,6 +599,19 @@ class RealWorkflowsTest(unittest.TestCase):
             with self.subTest(workflow=name):
                 self.assertEqual(len(aws_jobs(self.workflows[name])), 1)
 
+    def test_deployのconcurrencyはgroupがdeployで途中で止めない(self):
+        self.assertEqual(check_concurrency("deploy.yml", self.workflows["deploy.yml"]), [])
+
+    def test_testの同時実行は固定のtrueで取り消さずdeployと別groupになる(self):
+        self.assertEqual(check_concurrency("test.yml", self.workflows["test.yml"]), [])
+
+    def test_planは途中で取り消さずpathsにinfra_appを含む(self):
+        self.assertEqual(check_concurrency("plan.yml", self.workflows["plan.yml"]), [])
+        self.assertEqual(check_plan_paths(self.workflows["plan.yml"]), [])
+
+    def test_testのterraformジョブの判定ステップにifが付いていない(self):
+        self.assertEqual(check_terraform_judge(self.workflows["test.yml"]), [])
+
 
 # --- 各検査の異常系（条件を破る YAML を渡すと落ちる） ------------------------------
 
@@ -485,6 +622,10 @@ GOOD_PLAN = f"""\
 name: plan
 on:
   pull_request:
+    paths: [infra/app/**, .github/workflows/plan.yml]
+concurrency:
+  group: plan-${{{{ github.event.pull_request.number }}}}
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -514,6 +655,9 @@ name: deploy
 on:
   push:
     branches: [main]
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -540,6 +684,9 @@ name: test
 on:
   pull_request:
   workflow_call:
+concurrency:
+  group: test-${{{{ github.event.pull_request.number || github.run_id }}}}
+  cancel-in-progress: ${{{{ github.event_name == 'pull_request' }}}}
 permissions:
   contents: read
 jobs:
@@ -548,6 +695,18 @@ jobs:
     steps:
       - uses: actions/checkout@{SHA_A} # v7.0.1
       - run: pnpm test
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@{SHA_A} # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: changed
+        env:
+          EVENT_NAME: ${{{{ github.event_name }}}}
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+      - if: steps.changed.outputs.run == 'true'
+        run: terraform validate
 """
 
 
@@ -821,7 +980,7 @@ class SecretsAndExpressionsTest(unittest.TestCase):
 
     def test_runが1件も無ければ検出する(self):
         self.assertTrue(check_secrets_and_expressions(""))
-        self.assertTrue(check_secrets_and_expressions(mutate(GOOD_TEST, "      - run: pnpm test", "      - uses: ./x")))
+        self.assertTrue(check_secrets_and_expressions(GOOD_TEST.replace("run: ", "name: ")))
 
     def test_行末のコメントに隠した式も検出する(self):
         text = mutate(GOOD_DEPLOY, "- run: terraform apply -auto-approve", "- run: echo ok # ${{ secrets.AWS_REGION }}")
@@ -829,6 +988,85 @@ class SecretsAndExpressionsTest(unittest.TestCase):
 
     def test_envの中のSecretsやifの中のgithub_eventは許す(self):
         self.assertEqual(check_secrets_and_expressions(GOOD_PLAN), [])
+
+
+DEPLOY_CONCURRENCY = "concurrency:\n  group: deploy\n  cancel-in-progress: false\n"
+TEST_CANCEL = "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
+TEST_GROUP = "group: test-${{ github.event.pull_request.number || github.run_id }}"
+PLAN_CONCURRENCY = "concurrency:\n  group: plan-${{ github.event.pull_request.number }}\n  cancel-in-progress: false\n"
+PLAN_PATHS = "    paths: [infra/app/**, .github/workflows/plan.yml]\n"
+
+
+class ConcurrencyTest(unittest.TestCase):
+    def test_deployのconcurrencyが無い_途中で止める_groupが別名_読めない書き方は検出する(self):
+        self.assertTrue(check_concurrency("deploy.yml", mutate(GOOD_DEPLOY, DEPLOY_CONCURRENCY, "")))
+        self.assertTrue(check_concurrency("deploy.yml", mutate(GOOD_DEPLOY, "cancel-in-progress: false", "cancel-in-progress: true")))
+        self.assertTrue(check_concurrency("deploy.yml", mutate(GOOD_DEPLOY, "group: deploy", "group: deploy-${{ github.run_id }}")))
+        self.assertTrue(check_concurrency("deploy.yml", mutate(GOOD_DEPLOY, DEPLOY_CONCURRENCY, "concurrency: deploy\n")))
+        self.assertTrue(check_concurrency("deploy.yml", mutate(GOOD_DEPLOY, DEPLOY_CONCURRENCY, "concurrency: { group: deploy }\n")))
+
+    def test_testのcancel_in_progressが固定のtrueなら検出する(self):
+        for value in ("true", '"true"', "'true'", "True", "TRUE", "${{ true }}"):
+            with self.subTest(value=value):
+                self.assertTrue(check_concurrency("test.yml", mutate(GOOD_TEST, TEST_CANCEL, f"cancel-in-progress: {value}")))
+
+    def test_testのgroupがdeployと同じなら検出する(self):
+        for value in ("deploy", '"deploy"', "'deploy'"):
+            with self.subTest(value=value):
+                self.assertTrue(check_concurrency("test.yml", mutate(GOOD_TEST, TEST_GROUP, f"group: {value}")))
+
+    def test_testはPRのときだけ取り消す式を許しconcurrencyが無くても許す(self):
+        self.assertEqual(check_concurrency("test.yml", GOOD_TEST), [])
+        block = f"concurrency:\n  {TEST_GROUP}\n  {TEST_CANCEL}\n"
+        self.assertEqual(check_concurrency("test.yml", mutate(GOOD_TEST, block, "")), [])
+
+    def test_planのcancel_in_progressがfalse固定でなければ検出する(self):
+        for value in ("true", "True", "${{ true }}", "${{ github.event_name == 'pull_request' }}"):
+            with self.subTest(value=value):
+                self.assertTrue(check_concurrency("plan.yml", mutate(GOOD_PLAN, "cancel-in-progress: false", f"cancel-in-progress: {value}")))
+
+    def test_planはconcurrencyが無くても許す(self):
+        self.assertEqual(check_concurrency("plan.yml", mutate(GOOD_PLAN, PLAN_CONCURRENCY, "")), [])
+
+
+class PlanPathsTest(unittest.TestCase):
+    def test_pathsにinfra_appが無ければ検出する(self):
+        self.assertTrue(check_plan_paths(mutate(GOOD_PLAN, "infra/app/**, ", "")))
+        self.assertTrue(check_plan_paths(mutate(GOOD_PLAN, "infra/app/**", "infra/**")))
+
+    def test_pathsが無ければ検出する(self):
+        self.assertTrue(check_plan_paths(mutate(GOOD_PLAN, PLAN_PATHS, "")))
+
+    def test_paths_ignoreだけなら検出する(self):
+        self.assertTrue(check_plan_paths(mutate(GOOD_PLAN, "    paths: [infra/app/**, .github/workflows/plan.yml]", "    paths-ignore: [infra/app/**]")))
+
+    def test_行ごとのリスト形式も読める(self):
+        text = mutate(GOOD_PLAN, PLAN_PATHS, "    paths:\n      - infra/app/**\n      - .github/workflows/plan.yml\n")
+        self.assertEqual(check_plan_paths(text), [])
+
+    def test_pushにpathsが付いたら許可外として検出する(self):
+        self.assertTrue(check_triggers("deploy.yml", mutate(GOOD_DEPLOY, "    branches: [main]\n", "    branches: [main]\n    paths: [infra/**]\n")))
+
+
+class TerraformJudgeTest(unittest.TestCase):
+    def test_判定ステップに行頭のifが付いたら検出する(self):
+        text = mutate(GOOD_TEST, "      - id: changed\n", "      - id: changed\n        if: github.event_name == 'pull_request'\n")
+        self.assertTrue(check_terraform_judge(text))
+
+    def test_判定ステップの先頭にifを書いても検出する(self):
+        text = mutate(GOOD_TEST, "      - id: changed\n", "      - if: github.event_name == 'pull_request'\n        id: changed\n")
+        self.assertTrue(check_terraform_judge(text))
+
+    def test_terraformジョブ全体にifが付いたら検出する(self):
+        text = mutate(GOOD_TEST, "  terraform:\n", "  terraform:\n    if: github.event_name == 'push'\n")
+        self.assertTrue(check_terraform_judge(text))
+
+    def test_terraformジョブか判定ステップが無ければ検出する(self):
+        self.assertTrue(check_terraform_judge(mutate(GOOD_TEST, "  terraform:\n", "  other:\n")))
+        self.assertTrue(check_terraform_judge(mutate(GOOD_TEST, "steps.changed.outputs", "steps.other.outputs")))
+
+    def test_正常なものは通る(self):
+        self.assertEqual(check_terraform_judge(GOOD_TEST), [])
 
 
 class JobLayoutTest(unittest.TestCase):
