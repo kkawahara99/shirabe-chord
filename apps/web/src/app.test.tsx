@@ -1,6 +1,6 @@
 import { listShapesByLowestFret, optimizeSymbols } from "@shirabe-chord/core";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.tsx";
 import { voicingLabel } from "./voicing-diagram.tsx";
 
@@ -859,4 +859,86 @@ describe("App（配置・編集パネル・開閉）", () => {
       unmount();
     }
   }, 60_000);
+});
+
+describe("印刷とコピー", () => {
+  const INITIAL_TEXT = ["手の位置：おまかせ", "1. C  x32010", "2. Am  x02210", "3. F  133211", "4. G7  320001"].join("\n");
+  const copyButton = () => screen.getByRole("button", { name: "テキストでコピー" }) as HTMLButtonElement;
+  const printButton = () => screen.getByRole("button", { name: "印刷" }) as HTMLButtonElement;
+  const status = () => screen.getByRole("status").textContent;
+  const setClipboard = (clipboard: unknown) =>
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+  const click = async (button: HTMLElement) => {
+    fireEvent.click(button);
+    await act(async () => {});
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("「テキストでコピー」で、押さえ方の一覧がクリップボードに入り、成功の文が出る", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    render(<App />);
+    expect(status()).toBe("");
+    await click(copyButton());
+    expect(writeText).toHaveBeenCalledWith(INITIAL_TEXT);
+    expect(status()).toBe("コピーしました");
+  });
+
+  it("クリップボードへの書き込みが失敗したら、失敗の文が出る", async () => {
+    setClipboard({ writeText: vi.fn().mockRejectedValue(new Error("denied")) });
+    render(<App />);
+    await click(copyButton());
+    expect(status()).toBe("コピーできませんでした");
+  });
+
+  it("クリップボードが使えない環境でも、落ちずに失敗の文が出る", async () => {
+    render(<App />);
+    await click(copyButton());
+    expect(status()).toBe("コピーできませんでした");
+  });
+
+  it("コードを足すと、前のコピーの結果の文は消える", async () => {
+    setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
+    render(<App />);
+    await click(copyButton());
+    expect(status()).toBe("コピーしました");
+    fireEvent.click(screen.getByRole("button", { name: "＋ コードを追加" }));
+    expect(status()).toBe("");
+  });
+
+  it("手の位置を選び直すと、前のコピーの結果の文は消える", async () => {
+    setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
+    render(<App />);
+    await click(copyButton());
+    expect(status()).toBe("コピーしました");
+    fireEvent.click(cardButton(1));
+    expect(status()).toBe("");
+  });
+
+  it("「印刷」で window.print が呼ばれる", () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    render(<App />);
+    fireEvent.click(printButton());
+    expect(print).toHaveBeenCalledTimes(1);
+  });
+
+  it("進行が失敗しているときは、2つのボタンが押せない。直すと押せる", () => {
+    render(<App />);
+    expect(printButton().disabled).toBe(false);
+    expect(copyButton().disabled).toBe(false);
+    pick("種類", "7");
+    toggle("b9");
+    toggle("#9");
+    toggle("#11");
+    expect(alert()).not.toBeNull();
+    expect(printButton().disabled).toBe(true);
+    expect(copyButton().disabled).toBe(true);
+    toggle("#11");
+    expect(printButton().disabled).toBe(false);
+    expect(copyButton().disabled).toBe(false);
+  });
 });

@@ -17,6 +17,7 @@ import {
 } from "@shirabe-chord/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { displayQuality, displaySymbol, displayTension } from "./display-symbol.ts";
+import { handPositionLabel, progressionText } from "./progression-text.ts";
 import { ShapePicker } from "./shape-picker.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
@@ -239,6 +240,9 @@ export function App() {
   /** 最初のコードで選んだ押さえ方。`null` は「おまかせ」。先頭の記号が変わる・先頭が消えるたびに `null` に戻す。 */
   const [picked, setPicked] = useState<Shape | null>(null);
 
+  /** コピーの結果。進行や手の位置が変わったら消す（古い成功を残さない）。 */
+  const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
+
   const cardButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const closeButton = useRef<HTMLButtonElement>(null);
   /** 描画のあとでフォーカスを移す先。開閉の操作の時点では、移す先の要素がまだ無い（開くとき）か、まだ残っている（閉じるとき）。 */
@@ -256,6 +260,18 @@ export function App() {
     () => optimizeSymbols(symbols, picked ? { firstVoicing: picked.voicing } : undefined),
     [joined, picked], // eslint-disable-line react-hooks/exhaustive-deps -- 記号の中身が同じなら計算し直さない
   );
+
+  useEffect(() => setCopyStatus(null), [joined, picked]);
+
+  const copyText = async () => {
+    if (!result.ok) return;
+    try {
+      await navigator.clipboard.writeText(progressionText(picked?.lowestFret ?? null, result.steps));
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed"); // クリップボードが無い環境（TypeError）も、書き込みの拒否もここに来る
+    }
+  };
 
   const hasShapes = shapes.ok && shapes.shapes.length > 0;
   /** 「押さえ方」タブは、1 番目のコードを選んでいて、候補があるときだけ出せる。 */
@@ -308,7 +324,7 @@ export function App() {
           <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
         </div>
         <button type="button" className="hand-button" disabled={!hasShapes} onClick={showHandPosition}>
-          手の位置：{picked ? `第${picked.lowestFret}ポジション` : "おまかせ"}
+          手の位置：{handPositionLabel(picked?.lowestFret ?? null)}
         </button>
         <section aria-label="押さえ方の選び方" className="how">
           <details>
@@ -363,6 +379,18 @@ export function App() {
           )}
         </aside>
         <section aria-label="進行の押さえ方" className="score">
+          <div className="score-actions">
+            <button type="button" disabled={!result.ok} onClick={() => window.print()}>
+              印刷
+            </button>
+            <button type="button" disabled={!result.ok} onClick={copyText}>
+              テキストでコピー
+            </button>
+            <p role="status">
+              {copyStatus === "copied" && "コピーしました"}
+              {copyStatus === "failed" && "コピーできませんでした"}
+            </p>
+          </div>
           {!result.ok && (
             <div role="alert" className="failures">
               <ul>

@@ -1,7 +1,7 @@
 import { generateVoicings, parseChord, rootStrings, voicingFeatures, type Voicing } from "@shirabe-chord/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { startFretOf, VoicingDiagram, voicingLabel } from "./voicing-diagram.tsx";
+import { startFretOf, VoicingDiagram, voicingFrets, voicingLabel } from "./voicing-diagram.tsx";
 
 const C: Voicing = [null, 3, 2, 0, 1, 0];
 const F: Voicing = [1, 3, 3, 2, 1, 1];
@@ -44,6 +44,13 @@ describe("voicingLabel（読み上げ用ラベル）", () => {
   });
   it("10 以上のフレットを含むときだけ - で区切る", () => {
     expect(voicingLabel("Bm", [null, 10, 12, 12, 12, 10])).toBe("Bm: x-10-12-12-12-10");
+  });
+});
+
+describe("voicingFrets（押さえ方の書式）", () => {
+  it("ミュートは x。2 桁のフレットを含むときだけ - で区切る（voicingLabel の押さえ方の部分と同じ）", () => {
+    expect(voicingFrets(C)).toBe("x32010");
+    expect(voicingFrets([null, 10, 12, 12, 12, 10])).toBe("x-10-12-12-12-10");
   });
 });
 
