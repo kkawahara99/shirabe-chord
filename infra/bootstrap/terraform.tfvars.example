@@ -12,3 +12,9 @@ github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 
 # OIDC プロバイダが既にあるアカウントでは false にする
 create_github_oidc_provider = true
+
+# 費用のアラートの宛先（必須）。適用後に届く検証メールのリンクを 12 時間以内に開くまで、通知は届かない
+budget_alert_email = "alerts@example.com"
+
+# 月の予算の額（USD）。80% と 100% を超えたときに通知する。変えるときはここを書き換えて適用し直す
+monthly_budget_usd = 2
