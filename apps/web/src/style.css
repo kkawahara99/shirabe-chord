@@ -310,6 +310,20 @@ button[aria-pressed="true"] {
   overflow: auto;
 }
 
+.score-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.score-actions p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-sub);
+}
+
 .steps {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -512,5 +526,79 @@ button.step-remove {
 
   .steps {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ---- 印刷: 譜面（カードの並び）だけを、白地に黒で A4 の幅に収める ---- */
+
+@media print {
+  .panel,
+  .panel.closed,
+  .how,
+  .hand-button,
+  .step-remove,
+  .step-add,
+  .rail-button,
+  .score-actions {
+    display: none;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+  }
+
+  body,
+  .step,
+  .step:has(.step-select[aria-pressed="true"]) {
+    color: #000;
+    background: #fff;
+  }
+
+  .app {
+    display: block;
+    height: auto;
+  }
+
+  .body {
+    display: block;
+  }
+
+  .site-header {
+    position: static;
+    padding: 0 0 0.5rem;
+    border-bottom: none;
+  }
+
+  .site-title p {
+    display: none;
+  }
+
+  .score {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .step,
+  .step:has(.step-select[aria-pressed="true"]) {
+    padding-top: 0.5rem; /* 画面の狭い幅で「×」のために空けた余白は、印刷では要らない */
+    break-inside: avoid;
+    border: 1px solid #000;
+  }
+
+  button.step-select,
+  button.step-select[aria-pressed="true"] {
+    min-height: 0;
+    color: #000;
+    font-size: 1.125rem;
+  }
+
+  .out-of-window {
+    color: #000;
   }
 }

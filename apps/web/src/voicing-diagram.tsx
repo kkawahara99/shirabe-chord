@@ -56,11 +56,16 @@ export function startFretOf(voicing: Voicing): number {
   return Math.min(...pressed);
 }
 
-/** 読み上げ用のラベル。例 `C: x32010`。2 桁のフレットを含むときだけ `-` で区切る。 */
-export function voicingLabel(symbol: string, voicing: Voicing): string {
+/** 押さえ方の文字列。例 `x32010`。ミュートは x。2 桁のフレットを含むときだけ `-` で区切る。 */
+export function voicingFrets(voicing: Voicing): string {
   const frets = voicing.map((fret) => (fret === null ? "x" : String(fret)));
   const separator = voicing.some((fret) => fret !== null && fret >= 10) ? "-" : "";
-  return `${displaySymbol(symbol)}: ${frets.join(separator)}`;
+  return frets.join(separator);
+}
+
+/** 読み上げ用のラベル。例 `C: x32010`。 */
+export function voicingLabel(symbol: string, voicing: Voicing): string {
+  return `${displaySymbol(symbol)}: ${voicingFrets(voicing)}`;
 }
 
 /** セーハの縦棒の範囲。成り立たないときは undefined。 */
