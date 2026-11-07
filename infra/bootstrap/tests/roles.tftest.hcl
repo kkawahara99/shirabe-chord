@@ -6,7 +6,7 @@
 #   サイト用:       shirabe-prd-s3-site-123456789012-ap-northeast-1-an
 
 variables {
-  github_repository = "example-owner/example-repo"
+  github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 }
 
 mock_provider "aws" {
@@ -35,10 +35,10 @@ run "trust_デプロイ用はaudとsubがmainに完全一致" {
     condition = jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Condition == {
       StringEquals = {
         "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        "token.actions.githubusercontent.com:sub" = "repo:example-owner/example-repo:ref:refs/heads/main"
+        "token.actions.githubusercontent.com:sub" = "repo:example-owner@1000/example-repo@2000:ref:refs/heads/main"
       }
     }
-    error_message = "デプロイ用ロールの条件が StringEquals の aud=sts.amazonaws.com と sub=repo:<repo>:ref:refs/heads/main だけでない"
+    error_message = "デプロイ用ロールの条件が StringEquals の aud=sts.amazonaws.com と sub=<接頭辞>:ref:refs/heads/main だけでない"
   }
 }
 
@@ -49,28 +49,46 @@ run "trust_PR用はaudとsubがpull_requestに完全一致" {
     condition = jsondecode(aws_iam_role.plan.assume_role_policy).Statement[0].Condition == {
       StringEquals = {
         "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        "token.actions.githubusercontent.com:sub" = "repo:example-owner/example-repo:pull_request"
+        "token.actions.githubusercontent.com:sub" = "repo:example-owner@1000/example-repo@2000:pull_request"
       }
     }
-    error_message = "PR 用ロールの条件が StringEquals の aud=sts.amazonaws.com と sub=repo:<repo>:pull_request だけでない"
+    error_message = "PR 用ロールの条件が StringEquals の aud=sts.amazonaws.com と sub=<接頭辞>:pull_request だけでない"
   }
 }
 
-run "trust_github_repositoryを変えるとsubも変わる" {
+run "trust_github_oidc_sub_prefixを変えるとsubも変わる" {
   command = plan
 
   variables {
-    github_repository = "other-owner/other.repo"
+    github_oidc_sub_prefix = "repo:other-owner@3000/other.repo@4000"
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:other-owner@3000/other.repo@4000:ref:refs/heads/main"
+    error_message = "デプロイ用ロールの sub が github_oidc_sub_prefix に追従していない"
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.plan.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:other-owner@3000/other.repo@4000:pull_request"
+    error_message = "PR 用ロールの sub が github_oidc_sub_prefix に追従していない"
+  }
+}
+
+run "trust_従来の形の接頭辞でもsubを組み立てる" {
+  command = plan
+
+  variables {
+    github_oidc_sub_prefix = "repo:other-owner/other.repo"
   }
 
   assert {
     condition     = jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:other-owner/other.repo:ref:refs/heads/main"
-    error_message = "デプロイ用ロールの sub が github_repository に追従していない"
+    error_message = "従来の形で、デプロイ用ロールの sub が repo:<owner>/<repo>:ref:refs/heads/main にならない"
   }
 
   assert {
     condition     = jsondecode(aws_iam_role.plan.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] == "repo:other-owner/other.repo:pull_request"
-    error_message = "PR 用ロールの sub が github_repository に追従していない"
+    error_message = "従来の形で、PR 用ロールの sub が repo:<owner>/<repo>:pull_request にならない"
   }
 }
 

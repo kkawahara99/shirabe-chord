@@ -4,10 +4,10 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
-  <img src="docs/images/architecture-light.png" alt="構成図。利用者のブラウザは CloudFront から S3 の静的ファイルを取得する（モード 1・2）。モード 3 では、Cognito でログインし、API Gateway と Lambda を通して DynamoDB に掲載とコメントを保存する。人間かどうかの確認は Turnstile に任せる。">
+  <img src="docs/images/architecture-light.png" alt="構成図。利用者のブラウザは CloudFront から S3 の静的ファイルを取得する（モード 1・2）。GitHub Actions は OIDC で IAM ロールを引き受ける。デプロイ用のロールが CloudFront とサイト用の S3 を更新し、状態ファイルを読み書きする。モード 3 では、Cognito でログインし、API Gateway と Lambda を通して DynamoDB に掲載とコメントを保存する（予定）。人間かどうかの確認は Turnstile に任せる（予定）。">
 </picture>
 
-2026-11-03 時点の予定の構成図（アイコンは [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)）。`bootstrap` のバッジはコードがあるもの、ほかは未作成で、実装が進むと食い違う。
+2026-11-07 時点の構成図で、モード 3 の部品は予定（アイコンは [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)）。`bootstrap`・`app` のバッジは作成済みのもので、実装が進むと食い違う。矢印の更新を行うのはデプロイ用のロールで、PR 用のロールは読み取りとロックだけ。
 
 次の 3 つのモードを、番号順に作る（[docs/adr/0006](docs/adr/0006-product-scope-and-stages.md)）。
 
@@ -15,7 +15,7 @@
 2. 出力を、各コードの押さえ方の候補から選び直して微調整する。
 3. 出力を恒久的に掲載し、コメントを残せる（書き込みはログイン必須）。
 
-状態: モード 1 が手元で動く（配信はまだ。AWS のコードは `infra/bootstrap` の Terraform のみ）。
+状態: モード 1 を AWS で配信している。main へのマージで自動的にデプロイされる。
 
 手元で動かす（Node.js 24 系と pnpm が要る。版は `package.json` の `packageManager`）:
 
@@ -26,9 +26,27 @@ pnpm --filter web dev
 
 表示された URL（通常は http://localhost:5173/ ）をブラウザで開く。静的ファイルにするには `pnpm --filter web build`（`apps/web/dist` にできる）。画面は [docs/adr/0019](docs/adr/0019-web-screen-with-vite-and-react.md)。
 
-## 構成（予定）
+## 構成
 
-モード 1・2 は静的サイトで、コード理論と最適化はブラウザの中で動かす。上の図の理由は [docs/adr/](docs/adr/)（実装は TypeScript で [ADR 0007](docs/adr/0007-typescript-shared-core.md)、IaC は Terraform で [infra/](infra/README.md)、Organizations に依存しない [ADR 0003](docs/adr/0003-account-agnostic.md)）。
+モード 1・2 は静的サイトで、コード理論と最適化はブラウザの中で動かす。上の図の理由は [docs/adr/](docs/adr/)（実装は TypeScript で [ADR 0007](docs/adr/0007-typescript-shared-core.md)、IaC は Terraform で [infra/](infra/README.md)、Organizations に依存しない [ADR 0003](docs/adr/0003-account-agnostic.md)、配信は [ADR 0023](docs/adr/0023-static-site-delivery-with-cloudfront-and-s3.md)、CI/CD は [ADR 0027](docs/adr/0027-ci-cd-with-three-workflows.md)）。
+
+## 自分の AWS アカウントに置く
+
+前提条件:
+
+- Terraform と GitHub CLI（`gh`）が要る。自分のリポジトリ（fork）で行い、fork では Actions を有効にする。
+- リージョンを制限する SCP（組織で一律にかけるアクセス制限）があると、`us-east-1` が拒否されることがある。独自ドメインの証明書を置く場所で、SCP の作り方によっては CloudFront や IAM の操作も止まる。
+- 新しいアカウントでは、利用枠（クォータ）が低いことや、一部のサービスが使えないことがある。
+
+適用の順序:
+
+1. `infra/bootstrap` を手で適用し、GitHub Secrets を 4 つ入れる（[手順](infra/bootstrap/README.md)）。状態ファイル用のバケット、GitHub の OIDC プロバイダ、ロール 2 つができる。これ以降、main への push はデプロイになる。
+2. main に push する（押すコミットが無ければ空のコミットでよい）。`deploy.yml` が `infra/app` を適用し、サイトを置く。
+3. 公開 URL は `infra/app` の出力 `distribution_domain_name`。手元で読むには、`backend.app.hcl` を作って（[手順](infra/bootstrap/README.md)の 5）`terraform init -backend-config=backend.app.hcl` を流す。
+
+失敗した実行をやり直すときは、main の最新のコミットの実行を選ぶ。古いコミットの実行をやり直すと、サイトとインフラがその版に戻る。
+
+独自ドメインに切り替える: 手元の `infra/app/terraform.tfvars` に `domain_names` と `acm_certificate_arn`（`us-east-1` の証明書）を書いて適用し、DNS を `distribution_domain_name` へ向ける。CI への渡し方は未定で、手元で切り替えても次の自動デプロイで元に戻る。証明書と DNS は自分の環境で用意する（[ADR 0023](docs/adr/0023-static-site-delivery-with-cloudfront-and-s3.md)）。
 
 ## 開発フロー
 

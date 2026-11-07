@@ -1,7 +1,7 @@
 # バケット名の長さと環境名による変化を確かめる（docs/adr/0005-resource-naming.md）。
 
 variables {
-  github_repository = "example-owner/example-repo"
+  github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 }
 
 mock_provider "aws" {

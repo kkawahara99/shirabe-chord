@@ -3,7 +3,7 @@
 # プロバイダ側の設定の検証（`bucket_namespace` と名前の接尾辞の整合など）はモックでは走らず、実際の plan で初めて分かる。
 
 variables {
-  github_repository = "example-owner/example-repo"
+  github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
 }
 
 mock_provider "aws" {
