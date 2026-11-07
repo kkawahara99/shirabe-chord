@@ -1,0 +1,86 @@
+# main への push で、テスト → インフラの反映 → サイトの配置を行う。手動の起動（workflow_dispatch）は付けない。
+# 守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 同時に 2 つ走らせない。実行中の apply は途中で止めない（状態ファイルのロックが残るため）
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  # 伏せ字（mask-aws-account-id）はジョブ単位で効くので、AWS に入る手順は 1 つのジョブにまとめる
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # pnpm の版は package.json の packageManager から取る
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter web build
+
+      # ラッパーは標準出力に行を足し、terraform output -raw の値を壊す
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # apply のログに [id=...] の形でディストリビューション ID が出るのは許す（ID だけではアカウントを特定できない）
+      - name: terraform apply
+        working-directory: infra/app
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION"
+          terraform apply -auto-approve -input=false -lock-timeout=5m -no-color -var="region=$AWS_REGION"
+
+      # 値は echo せず、::add-mask:: の行だけを出して伏せる。以降は同じステップの中で使う（ステップをまたぐと伏せ字が効くか不確かなため）
+      - name: サイトを置いてキャッシュを消す
+        run: |
+          set -euo pipefail
+          BUCKET="$(terraform -chdir=infra/app output -raw site_bucket_name)"
+          DISTRIBUTION_ID="$(terraform -chdir=infra/app output -raw distribution_id)"
+          echo "::add-mask::$BUCKET"
+          echo "::add-mask::$DISTRIBUTION_ID"
+
+          # 古い index.html を持つ閲覧者が、消えたファイルで 404 にならない順序:
+          # (a) 新しい assets を足す → (b) index.html など assets 以外を入れ替えて古いものを消す → (c) 古い assets を消す
+          IMMUTABLE="public, max-age=31536000, immutable"
+          aws s3 sync apps/web/dist/assets "s3://$BUCKET/assets" --only-show-errors --cache-control "$IMMUTABLE"
+          aws s3 sync apps/web/dist "s3://$BUCKET" --only-show-errors --cache-control "no-cache" --exclude "assets/*" --delete
+          aws s3 sync apps/web/dist/assets "s3://$BUCKET/assets" --only-show-errors --cache-control "$IMMUTABLE" --delete
+
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*" > /dev/null
