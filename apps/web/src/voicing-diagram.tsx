@@ -1,4 +1,5 @@
 import { rootStrings, voicingFeatures, type Voicing } from "@shirabe-chord/core";
+import { displaySymbol } from "./display-symbol.ts";
 
 /** 図に描くフレットの数。 */
 const FRET_COLUMNS = 5;
@@ -59,7 +60,7 @@ export function startFretOf(voicing: Voicing): number {
 export function voicingLabel(symbol: string, voicing: Voicing): string {
   const frets = voicing.map((fret) => (fret === null ? "x" : String(fret)));
   const separator = voicing.some((fret) => fret !== null && fret >= 10) ? "-" : "";
-  return `${symbol}: ${frets.join(separator)}`;
+  return `${displaySymbol(symbol)}: ${frets.join(separator)}`;
 }
 
 /** セーハの縦棒の範囲。成り立たないときは undefined。 */
@@ -87,7 +88,7 @@ export function VoicingDiagram({
 
   return (
     <figure className="diagram">
-      {!hideCaption && <figcaption>{symbol}</figcaption>}
+      {!hideCaption && <figcaption>{displaySymbol(symbol)}</figcaption>}
       <svg
         role="img"
         aria-label={voicingLabel(symbol, voicing)}

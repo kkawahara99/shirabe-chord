@@ -16,6 +16,7 @@ import {
   type Tension,
 } from "@shirabe-chord/core";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { displayQuality, displaySymbol, displayTension } from "./display-symbol.ts";
 import { ShapePicker } from "./shape-picker.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
@@ -59,7 +60,7 @@ function symbolOf(selection: ChordSelection): string {
 }
 
 function describeInvalidChord({ index, symbol, reason }: InvalidChord): string {
-  const head = `${index + 1}番目の記号「${symbol}」は`;
+  const head = `${index + 1}番目の記号「${displaySymbol(symbol)}」は`;
   return reason === "no-voicing" ? `${head}押さえ方が見つかりません` : `${head}読めません`;
 }
 
@@ -176,7 +177,7 @@ function ChordTab(props: { selection: ChordSelection; onChange: (selection: Chor
                       })
                     }
                   />
-                  {name === "" ? "M" : name}
+                  {displayQuality(name)}
                 </label>
               ))}
             </div>
@@ -210,7 +211,7 @@ function ExtrasTab(props: { selection: ChordSelection; onChange: (selection: Cho
               disabled={!tensionable || blocked.has(tension)}
               onChange={(event) => toggleTension(tension, event.target.checked)}
             />
-            {tension}
+            {displayTension(tension)}
           </label>
         ))}
       </fieldset>
@@ -307,7 +308,7 @@ export function App() {
           <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
         </div>
         <button type="button" className="hand-button" disabled={!hasShapes} onClick={showHandPosition}>
-          手の位置：{picked ? `${picked.lowestFret}フレット付近` : "おまかせ"}
+          手の位置：{picked ? `第${picked.lowestFret}ポジション` : "おまかせ"}
         </button>
         <section aria-label="押さえ方の選び方" className="how">
           <details>
@@ -319,6 +320,7 @@ export function App() {
                 手の位置を選ぶと、最初のコードの最低フレットから5フレット分に収まる押さえ方から選びます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
               </li>
               <li>位置を選べるのは最初のコードだけです。</li>
+              <li>標準チューニングの右利きのギターを前提にしています。</li>
             </ul>
           </details>
         </section>
@@ -329,7 +331,7 @@ export function App() {
             <section aria-labelledby="editor-title" className="editor">
               <div className="editor-head">
                 <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
-                <span className="editor-symbol">{symbols[selected]}</span>
+                <span className="editor-symbol">{displaySymbol(symbols[selected]!)}</span>
                 <button type="button" ref={closeButton} onClick={closePanel}>
                   閉じる
                 </button>
@@ -383,9 +385,10 @@ export function App() {
                       cardButtons.current[i] = element;
                     }}
                     aria-pressed={open && i === selected}
+                    data-symbol={symbol}
                     onClick={() => chooseChord(i)}
                   >
-                    {symbol}
+                    {displaySymbol(symbol)}
                   </button>
                   {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
                   {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}

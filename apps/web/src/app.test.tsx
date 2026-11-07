@@ -20,7 +20,10 @@ const chordButtons = () =>
   within(screen.getByRole("list", { name: "コード進行" }))
     .getAllByRole("button")
     .filter((button) => button.hasAttribute("aria-pressed"));
-const chordSymbols = () => chordButtons().map((button) => button.textContent);
+const chordSymbols = () => chordButtons().map((button) => button.dataset.symbol);
+const chordTexts = () => chordButtons().map((button) => button.textContent);
+/** 画面の選択肢の表示。内部の記号の b・# は ♭・♯ で出る。 */
+const shown = (label: string) => label.replace("m7-5", "m7(♭5)").replace(/b/g, "♭").replace(/#/g, "♯");
 const pressedIndex = () => chordButtons().findIndex((button) => button.getAttribute("aria-pressed") === "true");
 
 const PICKER = "最初のコードの押さえ方の候補";
@@ -34,7 +37,7 @@ const cards = () => {
   showTab("押さえ方");
   return within(screen.getByRole("group", { name: PICKER })).getAllByRole("listitem");
 };
-const cardButton = (i: number) => within(cards()[i]!).getByRole("button", { name: `${firstShapes(chordSymbols()[0]!)[i]!.lowestFret}フレット付近` });
+const cardButton = (i: number) => within(cards()[i]!).getByRole("button", { name: `第${firstShapes(chordSymbols()[0]!)[i]!.lowestFret}ポジション` });
 const cardPressed = () => cards().map((_, i) => cardButton(i).getAttribute("aria-pressed"));
 const firstShapes = (symbol: string) => {
   const shapes = listShapesByLowestFret(symbol);
@@ -82,9 +85,9 @@ const closePanel = () => fireEvent.click(closeButton());
 const openRail = () => fireEvent.click(screen.getByRole("button", { name: "編集を開く" }));
 const handButton = () => screen.getByRole("button", { name: /^手の位置：/ }) as HTMLButtonElement;
 const radio = (groupName: string, label: string) =>
-  within(group(groupName)).getByRole("radio", { name: label }) as HTMLInputElement;
+  within(group(groupName)).getByRole("radio", { name: groupName === "種類" ? shown(label) : label }) as HTMLInputElement;
 const checkbox = (label: string) =>
-  within(group("テンション")).getByRole("checkbox", { name: label }) as HTMLInputElement;
+  within(group("テンション")).getByRole("checkbox", { name: shown(label) }) as HTMLInputElement;
 const pick = (groupName: string, label: string) => fireEvent.click(radio(groupName, label));
 const toggle = (label: string) => fireEvent.click(checkbox(label));
 const select = (index: number) => fireEvent.click(chordButtons()[index]!);
@@ -99,6 +102,42 @@ describe("App（画面全体）", () => {
     expect(diagramLabels()).toEqual(["C", "Am", "F", "G7"]);
     expect(alert()).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("初期の進行は従来どおりの表記で、カードの data-symbol も同じ", () => {
+    render(<App />);
+    expect(chordTexts()).toEqual(INITIAL);
+    expect(chordSymbols()).toEqual(INITIAL);
+    expect(document.querySelector(".editor-symbol")?.textContent).toBe("C");
+  });
+
+  it("Bb・F#m7-5・C7(b9)/E を選ぶと、カード・見出し・図の読み上げ名が譜面の表記になり、data-symbol は内部の記号のまま", () => {
+    render(<App />);
+    pick("根音の変化記号", "♭");
+    pick("根音の音名", "B");
+    expect(chordTexts()[0]).toBe("B♭");
+    expect(chordSymbols()[0]).toBe("Bb");
+    expect(document.querySelector(".editor-symbol")?.textContent).toBe("B♭");
+    expect(resultLabels()[0]).toMatch(/^B♭: /);
+
+    pick("根音の音名", "F");
+    pick("根音の変化記号", "♯");
+    pick("種類", "m7-5");
+    expect(chordTexts()[0]).toBe("F♯m7(♭5)");
+    expect(chordSymbols()[0]).toBe("F#m7-5");
+    expect(document.querySelector(".editor-symbol")?.textContent).toBe("F♯m7(♭5)");
+    expect(resultLabels()[0]).toMatch(/^F♯m7\(♭5\): /);
+    expect(radio("種類", "m7-5").labels?.[0]?.textContent).toBe("m7(♭5)");
+
+    pick("根音の音名", "C");
+    pick("根音の変化記号", "なし");
+    pick("種類", "7");
+    toggle("b9");
+    pick("ベース音の音名", "E");
+    expect(chordTexts()[0]).toBe("C7(♭9)/E");
+    expect(chordSymbols()[0]).toBe("C7(b9)/E");
+    expect(resultLabels()[0]).toMatch(/^C7\(♭9\)\/E: /);
+    expect(checkbox("#11").labels?.[0]?.textContent).toBe("♯11");
   });
 
   it("2 番目のボタンを押すと選択が移り、編集の部品が Am（根音 A・変化記号なし・種類 m・ベースなし）を示す", () => {
@@ -247,7 +286,7 @@ describe("App（画面全体）", () => {
     toggle("b9");
     toggle("#9");
     toggle("#11");
-    expect(alert()?.textContent).toMatch(/1番目の記号「C7\(b9,#9,#11\)」は押さえ方が見つかりません/);
+    expect(alert()?.textContent).toMatch(/1番目の記号「C7\(♭9,♯9,♯11\)」は押さえ方が見つかりません/);
     expect(diagrams()).toHaveLength(0);
     expect(chordSymbols()).toEqual(["C7(b9,#9,#11)", "Am", "F", "G7"]);
     toggle("#11");
@@ -255,12 +294,12 @@ describe("App（画面全体）", () => {
     expect(diagrams()).toHaveLength(4);
   });
 
-  it("「押さえ方」タブに、最低フレットごとの図が listShapesByLowestFret と同じ数だけ並び、各カードに「Nフレット付近」のボタンが 1 つある", () => {
+  it("「押さえ方」タブに、最低フレットごとの図が listShapesByLowestFret と同じ数だけ並び、各カードに「第Nポジション」のボタンが 1 つある", () => {
     render(<App />);
     const shapes = firstShapes("C");
     expect(cards()).toHaveLength(shapes.length);
     cards().forEach((card, i) => {
-      expect(within(card).getByText(`${shapes[i]!.lowestFret}フレット付近`)).toBeTruthy();
+      expect(within(card).getByText(`第${shapes[i]!.lowestFret}ポジション`)).toBeTruthy();
       expect(within(card).getAllByRole("img")).toHaveLength(1);
       expect(cardButton(i)).toBeTruthy();
     });
@@ -294,7 +333,7 @@ describe("App（画面全体）", () => {
     expect(resultLabels()).toEqual(expectedLabels(INITIAL));
   });
 
-  it("候補のカードの「Nフレット付近」ボタンを押すと、そのボタンだけ押された状態になり、最初の図がその押さえ方になり、続く図が再計算される", () => {
+  it("候補のカードの「第Nポジション」ボタンを押すと、そのボタンだけ押された状態になり、最初の図がその押さえ方になり、続く図が再計算される", () => {
     render(<App />);
     const shapes = firstShapes("C");
     const index = shapes.length - 1; // ネックの付け根寄り
@@ -419,7 +458,7 @@ describe("App（画面全体）", () => {
     expect(diagrams()[0]!.closest(".step")?.textContent).not.toContain("手の位置から外れた");
   });
 
-  it("「押さえ方の選び方」の説明が画面にあり、4 つの点（進行全体で選ぶ・同じコードでも同じとは限らない・位置を選ぶと 5 フレットに収める・選べるのは最初のコードだけ）を含む", () => {
+  it("「押さえ方の選び方」の説明が画面にあり、5 つの点（標準チューニングの右利き前提・進行全体で選ぶ・同じコードでも同じとは限らない・位置を選ぶと 5 フレットに収める・選べるのは最初のコードだけ）を含む", () => {
     render(<App />);
     const text = screen.getByRole("region", { name: "押さえ方の選び方" }).textContent ?? "";
     expect(text).toContain("進行全体");
@@ -428,6 +467,7 @@ describe("App（画面全体）", () => {
     expect(text).toContain("開放弦とミュート");
     expect(text).toContain("手の位置から外れた押さえ方です");
     expect(text).toContain("最初のコードだけ");
+    expect(text).toContain("標準チューニングの右利きのギターを前提にしています。");
   });
 
   it("apps/web のソース（.ts・.tsx）に、HTML をそのまま差し込む React の機能（dangerously で始まるもの）が無い", () => {
@@ -695,7 +735,7 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(document.activeElement).not.toBe(closeButton());
   });
 
-  it("ヘッダーにサイト名と説明文があり、手の位置のボタンは「おまかせ」では「手の位置：おまかせ」、選ぶと「手の位置：Nフレット付近」になる", () => {
+  it("ヘッダーにサイト名と説明文があり、手の位置のボタンは「おまかせ」では「手の位置：おまかせ」、選ぶと「手の位置：第Nポジション」になる", () => {
     const { container } = render(<App />);
     const header = container.querySelector("header")!;
     expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("shirabe-chord");
@@ -703,7 +743,7 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(handButton().textContent).toBe("手の位置：おまかせ");
     const shapes = firstShapes("C");
     fireEvent.click(cardButton(3));
-    expect(handButton().textContent).toBe(`手の位置：${shapes[3]!.lowestFret}フレット付近`);
+    expect(handButton().textContent).toBe(`手の位置：第${shapes[3]!.lowestFret}ポジション`);
     fireEvent.click(autoButton());
     expect(handButton().textContent).toBe("手の位置：おまかせ");
   });
@@ -721,12 +761,12 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(pressedTab()).toBe("押さえ方");
   });
 
-  it("「押さえ方の選び方」は、ヘッダーの中の領域にある開閉の部品（summary は「選び方」）で、4 つの点を含む", () => {
+  it("「押さえ方の選び方」は、ヘッダーの中の領域にある開閉の部品（summary は「選び方」）で、5 つの点を含む", () => {
     const { container } = render(<App />);
     const region = screen.getByRole("region", { name: "押さえ方の選び方" });
     expect(container.querySelector("header")!.contains(region)).toBe(true);
     expect(region.querySelector("details > summary")?.textContent).toBe("選び方");
-    expect(region.querySelectorAll("li")).toHaveLength(4);
+    expect(region.querySelectorAll("li")).toHaveLength(5);
   });
 
   it("操作をランダムに数百回くり返しても、選択の番号は範囲内で、選択中のカードは開いていればちょうど 1 枚（閉じていれば 0 枚）、押されたタブはちょうど 1 つ、「押さえ方」タブは出せるときだけ出る", () => {
