@@ -17,3 +17,14 @@ output "distribution_domain_name" {
   description = "CloudFront が払い出すドメイン名。公開 URL、独自ドメインの DNS の向け先。"
   value       = aws_cloudfront_distribution.site.domain_name
 }
+
+# 画面のビルドに渡す値。未設定のあいだは空文字（共有のボタンを出さない）
+output "cognito_domain_url" {
+  description = "Cognito のホステッド UI のドメインの URL。画面のビルドに渡す。共有の部品が無いときは空文字。"
+  value       = local.sharing_enabled ? "https://${var.cognito_domain_prefix}.auth.${data.aws_region.current.region}.amazoncognito.com" : ""
+}
+
+output "cognito_client_id" {
+  description = "画面用のアプリクライアントの ID。画面のビルドに渡す。共有の部品が無いときは空文字。"
+  value       = local.sharing_enabled ? aws_cognito_user_pool_client.web[0].id : ""
+}

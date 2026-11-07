@@ -59,3 +59,43 @@ variable "acm_certificate_arn" {
     error_message = "acm_certificate_arn は us-east-1 の ACM 証明書（arn:aws:acm:us-east-1:...）にしてください。"
   }
 }
+
+# 共有の部品（Cognito など）の切り替え口。3つがそろったときだけ作る（docs/adr/0035-share-by-unguessable-url-with-google-login.md）
+variable "google_client_id" {
+  type        = string
+  description = "Google の OAuth クライアント ID。空なら共有の部品を作らない。設定するときは google_client_secret と cognito_domain_prefix も要る。"
+  default     = ""
+
+  validation {
+    condition = (
+      (var.google_client_id == "") == (var.google_client_secret == "") &&
+      (var.google_client_id == "") == (var.cognito_domain_prefix == "")
+    )
+    error_message = "google_client_id・google_client_secret・cognito_domain_prefix は、すべて設定するか、すべて空にしてください。"
+  }
+}
+
+variable "google_client_secret" {
+  type        = string
+  description = "Google の OAuth クライアントシークレット。Cognito の IdP の設定に要るため、状態ファイルに入る（docs/adr/0035-share-by-unguessable-url-with-google-login.md）。"
+  default     = ""
+  sensitive   = true
+}
+
+variable "cognito_domain_prefix" {
+  type        = string
+  description = "Cognito のホステッド UI のドメインの接頭辞。リージョン内で全アカウント共通なので、重ならない名前にする。アカウントIDは入れない（公開される URL に出る）。"
+  default     = ""
+
+  validation {
+    # 空は未設定。Cognito の API は先頭・末尾のハイフンを受け付けない
+    condition     = var.cognito_domain_prefix == "" || can(regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", var.cognito_domain_prefix))
+    error_message = "cognito_domain_prefix は、小文字の英数字とハイフンの1〜63文字（先頭と末尾はハイフン不可）にしてください。"
+  }
+
+  validation {
+    # Cognito が接頭辞に使えない語
+    condition     = !can(regex("cognito|aws|amazon", var.cognito_domain_prefix))
+    error_message = "cognito_domain_prefix に cognito・aws・amazon を含めないでください（Cognito が禁じています）。"
+  }
+}

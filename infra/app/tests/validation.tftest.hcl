@@ -281,3 +281,149 @@ run "証明書_正常_nullを明示してもus-east-1の検査で失敗しない
     error_message = "null の acm_certificate_arn が通らない"
   }
 }
+
+# --- 共有の変数（google_client_id・google_client_secret・cognito_domain_prefix） ---
+
+run "共有変数_正常_3つとも空は通る" {
+  command = plan
+  assert {
+    condition     = var.google_client_id == "" && var.google_client_secret == "" && var.cognito_domain_prefix == ""
+    error_message = "既定値（3つとも空）が通らない"
+  }
+}
+
+run "共有変数_正常_3つとも設定は通る" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "shirabe-example"
+  }
+  assert {
+    condition     = local.sharing_enabled
+    error_message = "3つとも設定したのに sharing_enabled が false"
+  }
+}
+
+run "共有変数_異常_client_idだけの設定は失敗" {
+  command = plan
+  variables {
+    google_client_id = "example.apps.googleusercontent.com"
+  }
+  expect_failures = [var.google_client_id]
+}
+
+run "共有変数_異常_secretだけの設定は失敗" {
+  command = plan
+  variables {
+    google_client_secret = "example-secret"
+  }
+  expect_failures = [var.google_client_id]
+}
+
+run "共有変数_異常_prefixだけの設定は失敗" {
+  command = plan
+  variables {
+    cognito_domain_prefix = "shirabe-example"
+  }
+  expect_failures = [var.google_client_id]
+}
+
+# --- cognito_domain_prefix ---
+
+run "接頭辞_正常_1文字は通る" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "a"
+  }
+  assert {
+    condition     = var.cognito_domain_prefix == "a"
+    error_message = "1文字の接頭辞が通らない"
+  }
+}
+
+run "接頭辞_正常_63文字は通る" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "a23456789012345678901234567890123456789012345678901234567890123"
+  }
+  assert {
+    condition     = length(var.cognito_domain_prefix) == 63
+    error_message = "63文字の接頭辞が通らない"
+  }
+}
+
+run "接頭辞_異常_大文字は失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "Shirabe"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
+
+run "接頭辞_異常_アンダースコアは失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "shirabe_x"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
+
+run "接頭辞_異常_64文字は失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "a234567890123456789012345678901234567890123456789012345678901234"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
+
+# Cognito の API は先頭と末尾のハイフンを受け付けない。apply で初めて落ちないよう、変数の検証で止める
+run "接頭辞_異常_先頭と末尾のハイフンは失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "-shirabe-"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
+
+run "接頭辞_異常_cognitoを含むと失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "my-cognito-app"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
+
+run "接頭辞_異常_awsを含むと失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "myawsapp"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
+
+run "接頭辞_異常_amazonを含むと失敗" {
+  command = plan
+  variables {
+    google_client_id      = "example.apps.googleusercontent.com"
+    google_client_secret  = "example-secret"
+    cognito_domain_prefix = "amazon-x"
+  }
+  expect_failures = [var.cognito_domain_prefix]
+}
