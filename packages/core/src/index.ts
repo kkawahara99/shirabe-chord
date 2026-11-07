@@ -9,6 +9,7 @@ export type {
   NoteSelection,
   Tension,
 } from "./chord-builder.ts";
+export { lowerSymbol } from "./chord-transpose.ts";
 export { DEFAULT_COST_WEIGHTS, transitionCost, voicingCost } from "./cost.ts";
 export type { CostWeights } from "./cost.ts";
 export { transpose } from "./pitch-class.ts";
