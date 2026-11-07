@@ -2,6 +2,7 @@
 
 variables {
   github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
+  budget_alert_email     = "alerts@example.com"
 }
 
 mock_provider "aws" {

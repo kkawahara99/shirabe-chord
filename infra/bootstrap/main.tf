@@ -26,6 +26,9 @@ locals {
   # <プロジェクト名>-<環境名>-iam-<用途>（64 文字以内）
   deploy_role_name = "${var.project_name}-${var.environment}-iam-deploy"
   plan_role_name   = "${var.project_name}-${var.environment}-iam-plan"
+
+  # <プロジェクト名>-<環境名>-budgets-<用途>
+  budget_name = "${var.project_name}-${var.environment}-budgets-monthly"
 }
 
 resource "aws_s3_bucket" "state" {

@@ -7,6 +7,7 @@
 
 variables {
   github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
+  budget_alert_email     = "alerts@example.com"
 }
 
 mock_provider "aws" {
@@ -261,6 +262,17 @@ run "plan_CloudFrontはGet_ListでResourceはアスタリスク" {
       if s.Resource == ["*"]
     ] == [["cloudfront:Get*", "cloudfront:List*"]]
     error_message = "Resource が * の文が、cloudfront:Get* と cloudfront:List* だけの 1 つでない"
+  }
+}
+
+run "plan_s3とcloudfront以外のサービスの権限が無い" {
+  command = plan
+
+  assert {
+    condition = toset(flatten([
+      for s in jsondecode(aws_iam_role_policy.plan.policy).Statement : [for a in s.Action : split(":", a)[0]]
+    ])) == toset(["s3", "cloudfront"])
+    error_message = "s3 と cloudfront 以外のサービス（budgets・lambda・dynamodb・iam など）の権限がある"
   }
 }
 

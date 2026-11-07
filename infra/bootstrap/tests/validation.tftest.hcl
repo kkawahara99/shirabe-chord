@@ -2,6 +2,7 @@
 
 variables {
   github_oidc_sub_prefix = "repo:example-owner@1000/example-repo@2000"
+  budget_alert_email     = "alerts@example.com"
 }
 
 mock_provider "aws" {
@@ -369,4 +370,105 @@ run "github_oidc_sub_prefix_異常_空白は失敗" {
     github_oidc_sub_prefix = "repo:owner/re po"
   }
   expect_failures = [var.github_oidc_sub_prefix]
+}
+
+# --- budget_alert_email ---
+
+run "budget_alert_email_正常_通常の形は通る" {
+  command = plan
+  variables {
+    budget_alert_email = "alerts@example.com"
+  }
+  assert {
+    condition     = nonsensitive(var.budget_alert_email) == "alerts@example.com"
+    error_message = "alerts@example.com が通らない"
+  }
+}
+
+run "budget_alert_email_正常_プラスも通る" {
+  command = plan
+  variables {
+    budget_alert_email = "a+b@example.com"
+  }
+  assert {
+    condition     = nonsensitive(var.budget_alert_email) == "a+b@example.com"
+    error_message = "a+b@example.com が通らない"
+  }
+}
+
+run "budget_alert_email_異常_空は失敗" {
+  command = plan
+  variables {
+    budget_alert_email = ""
+  }
+  expect_failures = [var.budget_alert_email]
+}
+
+run "budget_alert_email_異常_アットなしは失敗" {
+  command = plan
+  variables {
+    budget_alert_email = "alerts.example.com"
+  }
+  expect_failures = [var.budget_alert_email]
+}
+
+run "budget_alert_email_異常_ドメインに点なしは失敗" {
+  command = plan
+  variables {
+    budget_alert_email = "alerts@example"
+  }
+  expect_failures = [var.budget_alert_email]
+}
+
+run "budget_alert_email_異常_アットが2つは失敗" {
+  command = plan
+  variables {
+    budget_alert_email = "a@b@example.com"
+  }
+  expect_failures = [var.budget_alert_email]
+}
+
+run "budget_alert_email_異常_空白は失敗" {
+  command = plan
+  variables {
+    budget_alert_email = "a b@example.com"
+  }
+  expect_failures = [var.budget_alert_email]
+}
+
+run "budget_alert_email_異常_ローカル部が空は失敗" {
+  command = plan
+  variables {
+    budget_alert_email = "@example.com"
+  }
+  expect_failures = [var.budget_alert_email]
+}
+
+# --- monthly_budget_usd ---
+
+run "monthly_budget_usd_正常_小数は通る" {
+  command = plan
+  variables {
+    monthly_budget_usd = 0.5
+  }
+  assert {
+    condition     = var.monthly_budget_usd == 0.5
+    error_message = "0.5 の monthly_budget_usd が通らない"
+  }
+}
+
+run "monthly_budget_usd_異常_0は失敗" {
+  command = plan
+  variables {
+    monthly_budget_usd = 0
+  }
+  expect_failures = [var.monthly_budget_usd]
+}
+
+run "monthly_budget_usd_異常_負は失敗" {
+  command = plan
+  variables {
+    monthly_budget_usd = -1
+  }
+  expect_failures = [var.monthly_budget_usd]
 }

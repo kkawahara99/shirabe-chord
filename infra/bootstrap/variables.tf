@@ -48,3 +48,25 @@ variable "create_github_oidc_provider" {
   description = "GitHub の OIDC プロバイダを新しく作るか。1 アカウントに同じ URL で 1 つしか作れないので、既にあるアカウント（ランディングゾーンが作った場合など）では false にして既存のものを使う（docs/adr/0003-account-agnostic.md）。"
   default     = true
 }
+
+variable "budget_alert_email" {
+  type        = string
+  description = "費用のアラートの宛先のメールアドレス。実値は terraform.tfvars（gitignore 対象）に書く（docs/adr/0030-budget-alert-in-bootstrap.md）。"
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.budget_alert_email))
+    error_message = "budget_alert_email はメールアドレスの形にしてください。"
+  }
+}
+
+variable "monthly_budget_usd" {
+  type        = number
+  description = "費用のアラートの基準にする、月の予算の額（USD）。額を変えるときは terraform.tfvars に書いて適用し直す。"
+  default     = 2
+
+  validation {
+    condition     = var.monthly_budget_usd > 0
+    error_message = "monthly_budget_usd は 0 より大きい値にしてください。"
+  }
+}
