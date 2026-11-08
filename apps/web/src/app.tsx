@@ -22,13 +22,16 @@ import { AuthControl } from "./auth-control.tsx";
 import { readAuthConfig, type AuthConfig } from "./auth-config.ts";
 import { AuthProvider } from "./auth-context.tsx";
 import { displayQuality, displaySymbol, displayTension } from "./display-symbol.ts";
+import type { ImportedScore } from "./import-score.ts";
 import { parseLoginReturn } from "./login.ts";
 import { handPositionLabel, progressionText } from "./progression-text.ts";
 import { pinMarksOf, readSnapshot, restorePins, type AfterAction } from "./resume.ts";
-import { MinePage, SharePage } from "./route-pages.tsx";
+import { MinePage } from "./route-pages.tsx";
 import { parseRoute } from "./route.ts";
 import { browserStorage } from "./session-store.ts";
 import { ShapePicker } from "./shape-picker.tsx";
+import { ShareDialog } from "./share-dialog.tsx";
+import { SharePage } from "./share-page.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
 const LETTERS: readonly NoteLetter[] = ["C", "D", "E", "F", "G", "A", "B"];
@@ -251,11 +254,9 @@ export type AppProps = {
   config?: AuthConfig | null;
   /** 別のページへ移る。既定は `location.assign`。 */
   goTo?: (url: string) => void;
-  /** ログインから戻ったとき、退避した操作が「共有ダイアログを開く」なら呼ぶ（ダイアログは共有の作成の Issue で作る）。 */
-  onResumeShare?: () => void;
 };
 
-export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.assign(url), onResumeShare }: AppProps = {}) {
+export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.assign(url) }: AppProps = {}) {
   /** 起動時の URL にあるログインの戻り。戻り先は `/` なので、それ以外のパスでは読まない。設定が空でも読まない。 */
   const [back] = useState(() =>
     config && window.location.pathname === "/" ? parseLoginReturn(window.location.search) : ({ kind: "none" } as const),
@@ -295,18 +296,25 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
   };
   /** 設定が空のあいだは、`/mine` などを開いてもトップを出す。 */
   const route = config ? parseRoute(path) : ({ kind: "home" } as const);
+  const [shareOpen, setShareOpen] = useState(false);
+  // ブラウザの戻る・進むで別の画面になったら、ダイアログを残さない
+  useEffect(() => {
+    if (route.kind !== "home") setShareOpen(false);
+  }, [route.kind]);
   const resume = (action: AfterAction) => {
     if (action === "mine") navigate("/mine");
-    else onResumeShare?.();
+    else setShareOpen(true);
   };
 
   const cardButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const shareButton = useRef<HTMLButtonElement>(null);
   /** 描画のあとでフォーカスを移す先。開閉の操作の時点では、移す先の要素がまだ無い（開くとき）か、まだ残っている（閉じるとき）。 */
-  const pendingFocus = useRef<"card" | "close" | null>(null);
+  const pendingFocus = useRef<"card" | "close" | "share" | null>(null);
   useEffect(() => {
     if (pendingFocus.current === "card") cardButtons.current[selected]?.focus();
     if (pendingFocus.current === "close") closeButton.current?.focus();
+    if (pendingFocus.current === "share") shareButton.current?.focus(); // ダイアログが閉じて、後ろの画面が操作できるようになってから
     pendingFocus.current = null;
   });
 
@@ -397,9 +405,25 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
     setTab("shape");
     setOpen(true);
   };
+  const closeShare = () => {
+    pendingFocus.current = "share";
+    setShareOpen(false);
+  };
+  /** 共有された譜面を、編集画面の状態にして、トップへ移る。共有元は変わらない。 */
+  const bringIn = (imported: ImportedScore) => {
+    setChords(imported.chords);
+    setCapo(imported.capo);
+    setPins(new Map(imported.pins));
+    setSelected(0);
+    setTab("chord");
+    setOpen(true);
+    navigate("/");
+  };
+  /** 共有に送る各コード。記号は鳴らす名前、押さえ方はカポをナットとみなした形。組み立てに失敗しているときは `null`。 */
+  const shareChords = shareOpen && result.ok ? symbols.map((symbol, i) => ({ symbol, voicing: result.steps[i]!.voicing })) : null;
 
-  const page = (
-    <div className="app">
+  const app = (
+    <div className="app" inert={shareOpen}>
       <header className="site-header">
         <div className="site-title">
           <h1>Shirabeコード</h1>
@@ -439,7 +463,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
         {config && <AuthControl onOpenMine={() => navigate("/mine")} />}
       </header>
       {route.kind === "mine" && <MinePage onHome={() => navigate("/")} />}
-      {route.kind === "share" && <SharePage onHome={() => navigate("/")} />}
+      {route.kind === "share" && <SharePage key={route.id} id={route.id} onHome={() => navigate("/")} onEdit={bringIn} />}
       {route.kind === "home" && (
         <div className="body">
           <aside className={open ? "panel" : "panel closed"}>
@@ -486,6 +510,11 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
               <button type="button" disabled={!result.ok} onClick={copyText}>
                 テキストでコピー
               </button>
+              {config && (
+                <button type="button" ref={shareButton} disabled={!result.ok} onClick={() => setShareOpen(true)}>
+                  共有する
+                </button>
+              )}
               <p role="status">
                 {copyStatus === "copied" && "コピーしました"}
                 {copyStatus === "failed" && "コピーできませんでした"}
@@ -545,6 +574,23 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
         </div>
       )}
     </div>
+  );
+  const page = (
+    <>
+      {app}
+      {config && shareOpen && (
+        <ShareDialog
+          chords={shareChords}
+          capo={capo}
+          siteKey={config.turnstileSiteKey}
+          onClose={closeShare}
+          onOpenMine={() => {
+            setShareOpen(false);
+            navigate("/mine");
+          }}
+        />
+      )}
+    </>
   );
 
   if (!config) return page;

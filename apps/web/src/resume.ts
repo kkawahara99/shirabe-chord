@@ -2,8 +2,10 @@ import {
   buildChordSymbol,
   CAPO_FRETS,
   CHORD_QUALITIES,
-  listShapesByLowestFret,
+  generateVoicings,
   lowerSymbol,
+  lowestPressedFret,
+  parseChord as parseChordSymbol,
   MAX_PROGRESSION_CHORDS,
   TENSIONS,
   type ChordSelection,
@@ -21,7 +23,7 @@ const KEY = "shirabe-chord.resume";
 /** ログインから戻ったあとに呼ぶ操作。 */
 export type AfterAction = "share" | "mine";
 
-/** 固定した押さえ方の目印。形そのものではなく、位置と候補の番号で持つ（復元で `listShapesByLowestFret` から引き直す）。 */
+/** 固定した押さえ方の目印。形そのものではなく、位置と候補の番号で持つ（復元で `generateVoicings` の候補から引き直す）。 */
 export type PinMark = { readonly position: number; readonly candidateIndex: number; readonly lowestFret: number };
 
 export type Snapshot = {
@@ -105,7 +107,7 @@ export function pinMarksOf(pins: ReadonlyMap<number, Shape>): PinMark[] {
   return [...pins].map(([position, shape]) => ({ position, candidateIndex: shape.candidateIndex, lowestFret: shape.lowestFret }));
 }
 
-/** 目印から押さえ方を引き直す。いまの候補に無くなったもの（コアの更新など）は捨てる。 */
+/** 目印から押さえ方を引き直す。いまの候補に無くなったもの・最低フレットが変わったもの（コアの更新など）は捨てる。 */
 export function restorePins(chords: readonly ChordSelection[], capo: number, marks: readonly PinMark[]): Map<number, Shape> {
   const pins = new Map<number, Shape>();
   for (const { position, candidateIndex, lowestFret } of marks) {
@@ -113,9 +115,10 @@ export function restorePins(chords: readonly ChordSelection[], capo: number, mar
     if (!chord) continue;
     const built = buildChordSymbol(chord);
     if (!built.ok) continue;
-    const listed = listShapesByLowestFret(lowerSymbol(built.symbol, capo));
-    const shape = listed.ok ? listed.shapes.find((s) => s.candidateIndex === candidateIndex && s.lowestFret === lowestFret) : undefined;
-    if (shape) pins.set(position, shape);
+    const parsed = parseChordSymbol(lowerSymbol(built.symbol, capo));
+    // 代表の候補（押さえ方タブに並ぶもの）に限らない。共有から持ち込んだ固定は、最適化の結果そのものを指す
+    const voicing = parsed.ok ? generateVoicings(parsed)[candidateIndex] : undefined;
+    if (voicing && lowestPressedFret(voicing) === lowestFret) pins.set(position, { lowestFret, voicing, candidateIndex });
   }
   return pins;
 }

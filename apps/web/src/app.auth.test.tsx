@@ -174,17 +174,16 @@ describe("ログインから戻ったとき", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it("戻ったあとの操作が「共有ダイアログを開く」なら、その操作（onResumeShare）を呼ぶ", async () => {
+  it("戻ったあとの操作が「共有ダイアログを開く」なら、共有ダイアログを開く", async () => {
     const goTo = goToSpy();
     saveSnapshot(sessionStorage, { chords: DEFAULT_CHORDS, capo: 0, pins: [], after: "share" });
     const url = await beginLogin(CONFIG, sessionStorage, ORIGIN);
     window.history.replaceState(null, "", `/?code=c&state=${new URL(url).searchParams.get("state")}`);
     vi.stubGlobal("fetch", tokenFetch());
-    const onResumeShare = vi.fn();
 
-    render(<App config={CONFIG} goTo={goTo} onResumeShare={onResumeShare} />);
+    render(<App config={CONFIG} goTo={goTo} />);
 
-    await waitFor(() => expect(onResumeShare).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("dialog", { name: "譜面を共有する" })).toBeTruthy();
   });
 
   it("戻ったあとの操作が「/mine を開く」なら、/mine の画面になる", async () => {
@@ -226,14 +225,13 @@ describe("ログインから戻ったとき", () => {
     ])("%s：操作を呼ばず、既定のトップをログイン済みで出す（例外にしない）", async (_name, prepare) => {
       prepare();
       await returnWith();
-      const onResumeShare = vi.fn();
 
-      render(<App config={CONFIG} goTo={goToSpy()} onResumeShare={onResumeShare} />);
+      render(<App config={CONFIG} goTo={goToSpy()} />);
 
       await screen.findByRole("button", { name: "アカウントのメニュー" });
       expect(chordSymbols()).toEqual(["C", "Am", "F", "G7"]);
       expect(Number(capoSelect().value)).toBe(0);
-      expect(onResumeShare).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.queryByText(FAILED_NOTICE)).toBeNull();
       expect(window.location.pathname).toBe("/");
     });
