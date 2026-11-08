@@ -26,7 +26,7 @@ import type { ImportedScore } from "./import-score.ts";
 import { parseLoginReturn } from "./login.ts";
 import { handPositionLabel, progressionText } from "./progression-text.ts";
 import { pinMarksOf, readSnapshot, restorePins, type AfterAction } from "./resume.ts";
-import { MinePage } from "./route-pages.tsx";
+import { MinePage } from "./mine-page.tsx";
 import { parseRoute } from "./route.ts";
 import { browserStorage } from "./session-store.ts";
 import { ShapePicker } from "./shape-picker.tsx";
@@ -462,7 +462,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
         )}
         {config && <AuthControl onOpenMine={() => navigate("/mine")} />}
       </header>
-      {route.kind === "mine" && <MinePage onHome={() => navigate("/")} />}
+      {route.kind === "mine" && <MinePage onHome={() => navigate("/")} onOpen={(id) => navigate(`/s/${id}`)} />}
       {route.kind === "share" && <SharePage key={route.id} id={route.id} onHome={() => navigate("/")} onEdit={bringIn} />}
       {route.kind === "home" && (
         <div className="body">

@@ -266,6 +266,59 @@ body {
   font-weight: bold;
 }
 
+/* ---- 共有した譜面の一覧 ---- */
+
+.mine-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.mine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.mine-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.mine-item p {
+  margin: 0;
+}
+
+.mine-title {
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.mine-meta {
+  font-size: 0.875rem;
+  color: var(--text-sub);
+}
+
+.mine-actions,
+.mine-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mine-confirm p:first-child {
+  width: 100%;
+}
+
 .problem {
   color: var(--warn);
 }
