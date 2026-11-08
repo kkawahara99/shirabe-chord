@@ -14,7 +14,13 @@ export { DEFAULT_COST_WEIGHTS, transitionCost, voicingCost } from "./cost.ts";
 export type { CostWeights } from "./cost.ts";
 export { transpose } from "./pitch-class.ts";
 export type { PitchClass } from "./pitch-class.ts";
-export { generateVoicings, rootStrings, validateVoicing, voicingFeatures } from "./voicing.ts";
+export {
+  generateVoicings,
+  lowestPressedFret,
+  rootStrings,
+  validateVoicing,
+  voicingFeatures,
+} from "./voicing.ts";
 export type {
   StringState,
   ValidateVoicingResult,

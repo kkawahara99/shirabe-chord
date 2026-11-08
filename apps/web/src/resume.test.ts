@@ -2,7 +2,10 @@ import {
   buildChordSymbol,
   CAPO_FRETS,
   CHORD_QUALITIES,
+  generateVoicings,
   listShapesByLowestFret,
+  lowestPressedFret,
+  parseChord,
   lowerSymbol,
   MAX_PROGRESSION_CHORDS,
   TENSIONS,
@@ -156,6 +159,18 @@ describe("pinMarksOf / restorePins", () => {
   it("カポがあるときは、カポで下げた形の記号の候補に戻す", () => {
     const shape = shapesOf(lowerSymbol("Am", 3))[0]!;
     expect(restorePins(chords, 3, pinMarksOf(new Map([[1, shape]])))).toEqual(new Map([[1, shape]]));
+  });
+
+  it("押さえ方タブの代表に当たらない固定（共有から持ち込んだ最適化の結果）も、復元で同じ押さえ方に戻す", () => {
+    const parsed = parseChord("C");
+    if (!parsed.ok) throw new Error("parse");
+    const representative = new Set(shapesOf("C").map((s) => s.candidateIndex));
+    const all = generateVoicings(parsed);
+    const index = all.findIndex((v, i) => !representative.has(i) && lowestPressedFret(v) !== undefined);
+    expect(index).toBeGreaterThan(-1); // 前提: 代表でない候補がある
+    const voicing = all[index]!;
+    const shape = { lowestFret: lowestPressedFret(voicing)!, voicing, candidateIndex: index };
+    expect(restorePins(chords, 0, pinMarksOf(new Map([[0, shape]])))).toEqual(new Map([[0, shape]]));
   });
 
   it("合わなくなった固定（候補が無い・最低フレットが違う）だけ捨てて、他は残す", () => {

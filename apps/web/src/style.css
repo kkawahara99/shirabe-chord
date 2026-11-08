@@ -160,6 +160,116 @@ body {
   padding: 1rem;
 }
 
+/* ---- 共有ページと共有ダイアログ ---- */
+
+/* .app は画面の高さに固定なので、共有ページは自分の中でスクロールする。 */
+.share-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.share-title {
+  margin: 0 0 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.share-note,
+.share-by {
+  margin: 0 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.share-note {
+  white-space: pre-wrap; /* ひと言の改行を保つ */
+}
+
+.share-by {
+  font-size: 0.875rem;
+  color: var(--text-sub);
+}
+
+.step-name {
+  max-width: 100%;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+
+.share-actions {
+  margin: 0.75rem 0;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--bg) 75%, transparent); /* 地の色を薄く重ねる（明暗どちらでも合う） */
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: min(32rem, 100%);
+  max-height: 100%;
+  padding: 1rem;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.dialog h2,
+.dialog p {
+  margin: 0;
+}
+
+.dialog form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  font-weight: bold;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  font: inherit;
+  font-weight: normal;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.field-hint {
+  font-size: 0.875rem;
+  color: var(--text-sub);
+}
+
+.share-notice {
+  font-weight: bold;
+}
+
+.problem {
+  color: var(--warn);
+}
+
 /* ---- 操作の部品（24x24 CSS ピクセル以上。ADR 0020） ---- */
 
 button {
@@ -625,6 +735,8 @@ button.step-remove {
   .hand-button,
   .capo-picker,
   .auth-area,
+  .dialog-backdrop,
+  .share-actions,
   .step-remove,
   .step-add,
   .rail-button,
