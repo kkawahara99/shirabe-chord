@@ -53,6 +53,8 @@ terraform -chdir=infra/bootstrap apply -input=false -no-color -state=<S> tfplan
 
    Turnstile の秘密鍵は Secrets に入れない。SSM のパラメータ `/<project_name>/<environment>/turnstile-secret`（既定は `/shirabe/prd/turnstile-secret`）に、手で SecureString として作る。
 
+   Google の OAuth クライアントの承認済みのリダイレクト URI は `https://<COGNITO_DOMAIN_PREFIX>.auth.<region>.amazoncognito.com/oauth2/idpresponse`、Turnstile のウィジェットのホスト名は公開 URL のドメイン。Google の同意画面が「テスト中」のあいだは、テストユーザーに足したアカウントしかログインできない（本番にするにはプライバシーポリシーの URL が要る）。共有を開く側はログインしないので影響しない。
+
 `apply` はアカウントに実際にバケットとロールと予算を作るので、本人が承認してから行う。
 
 適用の後、Budgets のコンソールの予算の詳細にある `Email verification` で、宛先の状態が `Verified` であることを確かめる。まだなら、検証メール（期限 12 時間）のリンクを開いてこのアカウントにサインインする。メールが無いときや期限が切れたときは、同じ欄から送り直す。検証が済むまで通知は届かない。

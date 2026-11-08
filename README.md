@@ -4,18 +4,18 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-dark.png">
-  <img src="docs/images/architecture-light.png" alt="構成図。利用者のブラウザは CloudFront から S3 の静的ファイルを取得する（モード 1・2）。GitHub Actions は OIDC で IAM ロールを引き受ける。デプロイ用のロールが CloudFront とサイト用の S3 を更新し、状態ファイルを読み書きする。モード 3 では、Cognito でログインし、API Gateway と Lambda を通して DynamoDB に掲載とコメントを保存する（予定）。人間かどうかの確認は Turnstile に任せる（予定）。">
+  <img src="docs/images/architecture-light.png" alt="構成図。利用者のブラウザは CloudFront から S3 の静的ファイルを取得する（モード 1・2）。GitHub Actions は OIDC で IAM ロールを引き受ける。デプロイ用のロールが CloudFront とサイト用の S3 を更新し、状態ファイルを読み書きする。モード 3 の共有では、Google のアカウントで Cognito にログインし、CloudFront の /api/* から API Gateway と Lambda を通して DynamoDB に譜面を保存する。人間かどうかの確認は Turnstile に任せ、Lambda がそのトークンを確かめる。">
 </picture>
 
-2026-11-07 時点の構成図で、モード 3 の部品は予定（アイコンは [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)）。`bootstrap`・`app` のバッジは作成済みのもので、実装が進むと食い違う。矢印の更新を行うのはデプロイ用のロールで、PR 用のロールは読み取りとロックだけ。
+2026-11-08 時点の構成図（アイコンは [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)）。`bootstrap`・`app` のバッジは、その資源を作るルートモジュールで、実装が進むと食い違う。矢印の更新を行うのはデプロイ用のロールで、PR 用のロールは読み取りとロックだけ。
 
 次の 3 つのモードを、番号順に作る（[docs/adr/0006](docs/adr/0006-product-scope-and-stages.md)）。
 
 1. 自由にコード進行を入れて、出力を得る（ログイン不要）。
 2. 出力を、各コードの押さえ方の候補から選び直して微調整する。
-3. 出力を恒久的に掲載し、コメントを残せる（書き込みはログイン必須）。
+3. 出力を、URL を知る人だけが見られる形で共有する（共有するには Google でのログインが要る。[docs/adr/0035](docs/adr/0035-share-by-unguessable-url-with-google-login.md)）。
 
-状態: モード 1 を AWS で配信している。main へのマージで自動的にデプロイされる。
+状態: モード 1〜3 を AWS で配信している。main へのマージで自動的にデプロイされる。
 
 手元で動かす（Node.js 24 系と pnpm が要る。版は `package.json` の `packageManager`）:
 
