@@ -36,7 +36,7 @@ export type VoicingFeatures = {
 const STRING_COUNT = 6;
 const MAX_FRET = 15;
 /** 標準チューニング（E2・A2・D3・G3・B3・E4）の開放弦の高さ。MIDI のノート番号。 */
-const OPEN_PITCHES: readonly number[] = [40, 45, 50, 55, 59, 64];
+export const OPEN_PITCHES: readonly number[] = [40, 45, 50, 55, 59, 64];
 const MIN_SOUNDING_STRINGS = 3;
 const MAX_SPAN = 3;
 const MAX_INNER_MUTES = 1;
