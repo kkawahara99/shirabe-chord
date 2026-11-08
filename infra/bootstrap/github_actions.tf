@@ -188,10 +188,11 @@ resource "aws_iam_role_policy" "deploy" {
         Resource = ["*"]
       },
       {
-        # API の ARN は ID（作るまで決まらない）なので、名前では絞れない。CloudFront の文と同じ扱い
+        # API の ARN は ID（作るまで決まらない）なので、名前では絞れない。CloudFront の文と同じ扱い。
+        # TagResource は、タグ付きでステージを作るときに HTTP の動詞とは別に求められる（#82 の実適用で拒否された）
         Sid      = "ApiGateway"
         Effect   = "Allow"
-        Action   = ["apigateway:GET", "apigateway:POST", "apigateway:PUT", "apigateway:PATCH", "apigateway:DELETE"]
+        Action   = ["apigateway:GET", "apigateway:POST", "apigateway:PUT", "apigateway:PATCH", "apigateway:DELETE", "apigateway:TagResource"]
         Resource = ["*"]
       },
       {

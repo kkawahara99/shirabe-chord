@@ -542,7 +542,8 @@ run "deploy_Resourceがアスタリスクの文はCloudFrontとCognitoとAPI_Gat
         "cognito-idp:CreateUserPoolDomain", "cognito-idp:DeleteUserPoolDomain", "cognito-idp:DescribeUserPoolDomain", "cognito-idp:UpdateUserPoolDomain",
         "cognito-idp:TagResource", "cognito-idp:UntagResource", "cognito-idp:ListTagsForResource",
       ],
-      ["apigateway:GET", "apigateway:POST", "apigateway:PUT", "apigateway:PATCH", "apigateway:DELETE"],
+      # TagResource は、タグ付きでステージを作るときに要る（#82 の実適用で拒否された）
+      ["apigateway:GET", "apigateway:POST", "apigateway:PUT", "apigateway:PATCH", "apigateway:DELETE", "apigateway:TagResource"],
     ]
     error_message = "Resource が * の文が、CloudFront・Cognito・API Gateway の指定どおりのアクションの 3 つだけでない"
   }
