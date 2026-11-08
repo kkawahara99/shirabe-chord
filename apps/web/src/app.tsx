@@ -573,6 +573,11 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
           </section>
         </div>
       )}
+      {config && (
+        <footer className="site-footer">
+          <a href="/privacy.html">プライバシーポリシー</a>
+        </footer>
+      )}
     </div>
   );
   const page = (

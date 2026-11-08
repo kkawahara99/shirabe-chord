@@ -1,0 +1,75 @@
+/* privacy.html 用。public/ のファイルは Vite を通らないので style.css は読めず、色の考え方だけを写している（privacy-page.test.ts が値の一致を守る）。 */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --text: #15181e;
+  --line: #d8dce3;
+  --accent: #2b3fd6;
+}
+
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #12141a;
+    --surface: #1c1f27;
+    --text: #e8eaf0;
+    --line: #343a46;
+    --accent: #8f9dff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+h2 {
+  margin: 1.5rem 0 0.5rem;
+  padding-bottom: 0.25rem;
+  font-size: 1.125rem;
+  border-bottom: 1px solid var(--line);
+}
+
+p,
+ul {
+  margin: 0.5rem 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media print {
+  body,
+  main {
+    color: #000;
+    background: #fff;
+    border: none;
+  }
+}

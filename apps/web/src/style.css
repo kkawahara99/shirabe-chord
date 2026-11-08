@@ -323,6 +323,28 @@ body {
   color: var(--warn);
 }
 
+/* ---- 画面の下端のリンク ---- */
+
+.site-footer {
+  flex: none;
+  padding: 0.25rem 1rem;
+  font-size: 0.875rem;
+  text-align: right;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.site-footer a {
+  display: inline-block;
+  min-height: 24px; /* ADR 0020 */
+  color: var(--text-sub);
+}
+
+.site-footer a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ---- 操作の部品（24x24 CSS ピクセル以上。ADR 0020） ---- */
 
 button {
@@ -788,6 +810,7 @@ button.step-remove {
   .hand-button,
   .capo-picker,
   .auth-area,
+  .site-footer,
   .dialog-backdrop,
   .share-actions,
   .step-remove,

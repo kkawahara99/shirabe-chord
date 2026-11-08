@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/privacy.css" />
+    <title>プライバシーポリシー - Shirabeコード</title>
+  </head>
+  <body>
+    <main>
+      <h1>プライバシーポリシー</h1>
+      <p>Shirabeコードで、どんな情報をどう扱うかを書きます。コード進行を組み立てて見るだけなら、ログインは要らず、入力した内容は送りません。譜面を共有するときは、次のとおり扱います。</p>
+
+      <h2>ログインで受け取るもの</h2>
+      <p>ログインは Google だけです。Google から受け取るのは openid だけで、メールアドレスや名前は受け取らず、持ちません。</p>
+      <p>ログインの管理には AWS の Cognito を使います。Cognito のユーザーには、Google の識別子（ユーザー名）と、Cognito が発行する sub が残ります。共有をすべて削除しても、Cognito のユーザーの記録は残ります。消す手段は用意していません。</p>
+
+      <h2>共有で保存するもの</h2>
+      <ul>
+        <li>譜面（各コードと押さえ方、カポ）</li>
+        <li>タイトル、ひと言、表示名（共有のたびに本人が入力した文字）</li>
+        <li>作成日時</li>
+        <li>持ち主の識別子（Cognito の sub）</li>
+      </ul>
+      <p>共有した譜面は、URL を知る人は誰でも見られます。本人が /mine から削除するまで残ります。</p>
+
+      <h2>ログ</h2>
+      <p>CloudFront と API Gateway のアクセスログは取っていません。Lambda のログには、エラーの種類など入力を含まない固定の記録だけが残り、30 日で消えます。</p>
+      <p>AWS・Google・Cloudflare は、それぞれの方針で、通信元の IP アドレスなどを記録することがあります。</p>
+
+      <h2>ブラウザの中</h2>
+      <p>ログインのトークンと、入力途中の譜面を、ブラウザの sessionStorage に置きます。タブを閉じると消えます。</p>
+
+      <h2>使う外部のサービス</h2>
+      <ul>
+        <li>Google のログイン</li>
+        <li>Cloudflare Turnstile（不正な書き込みを防ぐための確認。共有のダイアログを開いたときだけ読み込みます）</li>
+        <li>AWS（サイトの配信、ログイン、共有の保存）</li>
+      </ul>
+
+      <p><a href="/">Shirabeコードに戻る</a></p>
+    </main>
+  </body>
+</html>

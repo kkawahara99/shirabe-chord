@@ -53,7 +53,9 @@ terraform -chdir=infra/bootstrap apply -input=false -no-color -state=<S> tfplan
 
    Turnstile の秘密鍵は Secrets に入れない。SSM のパラメータ `/<project_name>/<environment>/turnstile-secret`（既定は `/shirabe/prd/turnstile-secret`）に、手で SecureString として作る。
 
-   Google の OAuth クライアントの承認済みのリダイレクト URI は `https://<COGNITO_DOMAIN_PREFIX>.auth.<region>.amazoncognito.com/oauth2/idpresponse`、Turnstile のウィジェットのホスト名は公開 URL のドメイン。Google の同意画面が「テスト中」のあいだは、テストユーザーに足したアカウントしかログインできない（本番にするにはプライバシーポリシーの URL が要る）。共有を開く側はログインしないので影響しない。
+   Google の OAuth クライアントの承認済みのリダイレクト URI は `https://<COGNITO_DOMAIN_PREFIX>.auth.<region>.amazoncognito.com/oauth2/idpresponse`、Turnstile のウィジェットのホスト名は公開 URL のドメイン。Google の同意画面が「テスト中」のあいだは、テストユーザーに足したアカウントしかログインできない。共有を開く側はログインしないので影響しない。
+
+   本番にするには、Google Auth Platform の「ブランディング」でホームページを公開 URL（`infra/app` の出力 `distribution_domain_name`）の `/`、プライバシーポリシーを `/privacy.html` にし、承認済みドメインに公開 URL のドメインを足す。そのあと「対象」で「アプリを公開」を押す（[ADR 0037](../../docs/adr/0037-static-privacy-page-without-contact.md)）。
 
 `apply` はアカウントに実際にバケットとロールと予算を作るので、本人が承認してから行う。
 

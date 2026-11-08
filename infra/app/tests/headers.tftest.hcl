@@ -93,6 +93,7 @@ run "headers_CSP" {
   # pnpm --filter web build の成果物（apps/web/dist）で確かめた内容:
   #  - index.html は、同じオリジンの /assets/*.js（<script type="module" src>）・/assets/*.css（<link rel="stylesheet">）・/favicon.svg（<link rel="icon">）だけを読み込む。
   #  - インラインの <script>・<style> は無い。外部のオリジン・data: URI・フォント・画像の読み込みも無い。
+  #  - privacy.html は、同じオリジンの /privacy.css・/favicon.svg だけを読み込み、インラインは無い（apps/web/src/privacy-page.test.ts が守る）。
   #  - JS 内の http:// は XML の名前空間の文字列で、取得はされない。
   # 画面の作りを変えたとき（外部フォントや CDN の追加など）は、この値を見直す。
   assert {
