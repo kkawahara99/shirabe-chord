@@ -3,7 +3,7 @@
 #   - プロバイダ側の検証（user_pool_tier と managed_login_version の組み合わせ、ドメインの接頭辞の重複など）
 #   - 適用後も identities 属性が残り、メール・名前が無いこと
 #   - PKCE の実動作（Terraform に設定項目は無い。シークレットなしの公開クライアント＋認可コードフローで、画面側が code_challenge を付ける）
-#   - 適用後の 2 回目の plan で、IdP の provider_details に差分が出ないこと（Cognito が URL 類を自動で足す場合は lifecycle.ignore_changes で受ける）
+#   - IdP の provider_details に差分が出ないこと（Cognito が 6 つのキーを自動で足すので、cognito.tf の lifecycle.ignore_changes で受けている。確かめ方は push 後の deploy ログ）
 #   - Google 側の OAuth クライアントの設定（承認済みのリダイレクト URI に <ドメイン URL>/oauth2/idpresponse を入れる）
 
 mock_provider "aws" {

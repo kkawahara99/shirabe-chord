@@ -45,6 +45,19 @@ resource "aws_cognito_identity_provider" "google" {
   attribute_mapping = {
     username = "sub"
   }
+
+  # Cognito は Google の provider_details に次の 6 つを自動で足す。書かないと plan のたびに消そうとして偽の差分が出る。
+  # provider_details 全体は無視しない（client_secret や authorize_scopes の変更は反映させるため）。
+  lifecycle {
+    ignore_changes = [
+      provider_details["attributes_url"],
+      provider_details["attributes_url_add_attributes"],
+      provider_details["authorize_url"],
+      provider_details["oidc_issuer"],
+      provider_details["token_request_method"],
+      provider_details["token_url"],
+    ]
+  }
 }
 
 # 画面用の公開クライアント。PKCE に Terraform の設定項目は無く、シークレットなし＋認可コードフローで画面側が付ける
