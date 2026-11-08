@@ -40,7 +40,7 @@ pnpm --filter web dev
 
 適用の順序:
 
-1. `infra/bootstrap` を手で適用し、GitHub Secrets を 4 つ入れる（[手順](infra/bootstrap/README.md)）。状態ファイル用のバケット、GitHub の OIDC プロバイダ、ロール 2 つ、費用のアラートの予算ができる。これ以降、main への push はデプロイになる。
+1. `infra/bootstrap` を手で適用し、GitHub Secrets を 4 つ入れる（[手順](infra/bootstrap/README.md)）。譜面の共有を使うなら、Google と Turnstile 用の Secrets 4 つ（省略可）も入れる。状態ファイル用のバケット、GitHub の OIDC プロバイダ、ロール 2 つ、共有の API の実行ロール、費用のアラートの予算ができる。これ以降、main への push はデプロイになる。
 2. main に push する（押すコミットが無ければ空のコミットでよい）。`deploy.yml` が `infra/app` を適用し、サイトを置く。
 3. 公開 URL は `infra/app` の出力 `distribution_domain_name`。手元で読むには、`backend.app.hcl` を作って（[手順](infra/bootstrap/README.md)の 5）`terraform init -backend-config=backend.app.hcl` を流す。
 

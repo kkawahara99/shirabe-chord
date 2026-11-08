@@ -32,7 +32,15 @@ FORK_GUARD = "github.event.pull_request.head.repo.full_name == github.repository
 # plan の出力に、アカウントIDの入ったバケット名が出うる（ADR 0005）。ログ以外へ流す書き方を止める
 PLAN_FORBIDDEN_OUTPUTS = ("GITHUB_STEP_SUMMARY", "gh pr comment", "gh pr review", "gh issue comment", "gh api", "github-script")
 # plan.yml で使ってよいアクション。禁止の一覧は抜けが出る（upload-artifact は伏せ字が効かない）ので、使ってよい一覧で縛る
-PLAN_ALLOWED_ACTIONS = {"actions/checkout", "hashicorp/setup-terraform", "aws-actions/configure-aws-credentials"}
+# pnpm/action-setup と actions/setup-node は、API のビルド（Lambda に載せる zip の元）のために足した（docs/adr/0036-let-plan-build-api-with-sharing-secrets.md）。
+# どちらも deploy.yml と同じ SHA 固定のもの（固定の決まりは check_pinned_uses が見る）
+PLAN_ALLOWED_ACTIONS = {
+    "actions/checkout",
+    "hashicorp/setup-terraform",
+    "aws-actions/configure-aws-credentials",
+    "pnpm/action-setup",
+    "actions/setup-node",
+}
 
 AWS_ACTION = "aws-actions/configure-aws-credentials"
 
@@ -519,6 +527,117 @@ def check_terraform_judge(text: str) -> list[str]:
     return violations
 
 
+def step_codes(text: str, job: str) -> list[str]:
+    """ジョブのステップごとの文字列（全行コメントを除く）。ジョブが無ければ WorkflowFormatError。"""
+    lines = split_jobs(text).get(job)
+    if lines is None:
+        raise WorkflowFormatError(f"ジョブ {job} が無い")
+    # 行末のコメントも除く（`echo skip # pnpm --filter api build` で素通りさせない）
+    return [re.sub(r"[ \t]+#.*$", "", "\n".join(code_lines("\n".join(step))), flags=re.MULTILINE) for step in split_steps(lines)]
+
+
+def first_step(codes: list[str], pattern: str) -> int | None:
+    return next((i for i, code in enumerate(codes) if re.search(pattern, code)), None)
+
+
+# 順序の決まり。画面のビルドは apply の出力（Cognito のドメインとクライアント ID）を使うので apply の後、
+# API のビルドは apply が読む zip の元なので apply の前（docs/adr/0035-share-by-unguessable-url-with-google-login.md）
+DEPLOY_ORDER = [
+    ("依存のインストール", r"\bpnpm install\b"),
+    ("API のビルド", r"\bpnpm --filter api build\b"),
+    ("terraform apply", r"\bterraform apply\b"),
+    ("画面のビルド", r"\bpnpm --filter web build\b"),
+    ("サイトの配置", r"\baws s3 sync\b"),
+]
+PLAN_ORDER = [
+    ("依存のインストール", r"\bpnpm install\b"),
+    ("API のビルド", r"\bpnpm --filter api build\b"),
+    ("AWS の認証情報の取得", re.escape(AWS_ACTION) + "@"),
+    ("terraform plan", r"\bterraform plan\b"),
+]
+
+
+def check_step_order(text: str, job: str, order: list[tuple[str, str]]) -> list[str]:
+    codes = step_codes(text, job)
+    violations = []
+    previous: tuple[str, int] | None = None
+    for label, pattern in order:
+        index = first_step(codes, pattern)
+        if index is None:
+            violations.append(f"ジョブ {job}: {label}のステップが無い")
+            continue
+        if previous is not None and index <= previous[1]:
+            violations.append(f"ジョブ {job}: {label}は{previous[0]}より後に置く")
+        previous = (label, index)
+    return violations
+
+
+def check_deploy_order(text: str) -> list[str]:
+    return check_step_order(text, "deploy", DEPLOY_ORDER)
+
+
+# 認証情報を取った後の plan のジョブで、ビルドやスクリプトの実行を始めるコマンド
+BUILD_COMMANDS = r"\b(pnpm|npm|npx|yarn|node|corepack)\b"
+
+
+def check_plan_order(text: str) -> list[str]:
+    """plan では、依存のインストールと API のビルドを、AWS の認証情報を取る前に置く。
+
+    認証情報を環境変数で直接見せないための並べ方で、完全な隔離ではない（ジョブは OIDC のトークンを取れる状態にある。
+    docs/adr/0036-let-plan-build-api-with-sharing-secrets.md）。取った後にビルドを足して順序が崩れるのは止める。
+    """
+    violations = check_step_order(text, "plan", PLAN_ORDER)
+    codes = step_codes(text, "plan")
+    creds = first_step(codes, re.escape(AWS_ACTION) + "@")
+    if creds is not None:
+        for code in codes[creds + 1 :]:
+            if re.search(BUILD_COMMANDS, code):
+                violations.append("ジョブ plan: AWS の認証情報の取得の後に、pnpm・node などを使うステップがある（ビルドは取得の前に置く）")
+    return violations
+
+
+# Google の 3 つの値（terraform の変数名と Secrets 名）。値は env: の TF_VAR_* で渡す。-var はプロセス一覧やログに出うる
+GOOGLE_VARS = {
+    "TF_VAR_google_client_id": "GOOGLE_CLIENT_ID",
+    "TF_VAR_google_client_secret": "GOOGLE_CLIENT_SECRET",
+    "TF_VAR_cognito_domain_prefix": "COGNITO_DOMAIN_PREFIX",
+}
+
+
+def check_google_vars(text: str, job: str, command: str) -> list[str]:
+    """terraform の plan か apply のステップが、Google の 3 つの値を env: で Secrets から受け取り、-var では渡さない。"""
+    codes = step_codes(text, job)
+    index = first_step(codes, rf"\bterraform {command}\b")
+    if index is None:
+        return [f"ジョブ {job}: terraform {command} のステップが無い"]
+    violations = []
+    for var, secret in GOOGLE_VARS.items():
+        if not re.search(rf"^\s*{var}:\s*\$\{{\{{\s*secrets\.{secret}\s*\}}\}}\s*$", codes[index], re.MULTILINE):
+            violations.append(f"ジョブ {job}: terraform {command} のステップの env: に {var}: ${{{{ secrets.{secret} }}}} が無い")
+    for code in codes:
+        if re.search(r"""-var[= ]\s*["']?(google_|cognito_domain_prefix)""", code):
+            violations.append(f"ジョブ {job}: Google の値を -var で渡している（TF_VAR_* を env: で渡す）")
+    return violations
+
+
+def check_web_build_env(text: str) -> list[str]:
+    """deploy.yml 専用: 画面のビルドが、apply の出力の 2 つと Turnstile のサイトキーを VITE_* で受け取る。"""
+    codes = step_codes(text, "deploy")
+    index = first_step(codes, r"\bpnpm --filter web build\b")
+    if index is None:
+        return ["画面のビルドのステップが無い"]
+    code = codes[index]
+    violations = []
+    if not re.search(r"^\s*VITE_TURNSTILE_SITE_KEY:\s*\$\{\{\s*secrets\.TURNSTILE_SITE_KEY\s*\}\}\s*$", code, re.MULTILINE):
+        violations.append("画面のビルドの env: に VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }} が無い")
+    for name, output in (("VITE_COGNITO_DOMAIN", "cognito_domain_url"), ("VITE_COGNITO_CLIENT_ID", "cognito_client_id")):
+        if not re.search(rf"\b{name}=.*terraform -chdir=infra/app output -raw {output}\b", code):
+            violations.append(f"画面のビルドのステップで {name} に terraform output -raw {output} の値を入れていない")
+        if not re.search(rf"\bexport\b.*\b{name}\b", code):
+            violations.append(f"画面のビルドのステップで {name} を export していない（ビルドに渡らない）")
+    return violations
+
+
 def check_workflow_set(names: set[str]) -> list[str]:
     if names != set(ALLOWED_TRIGGERS):
         return [f"ワークフローは {sorted(ALLOWED_TRIGGERS)} の 3 本ちょうど（見つかった: {sorted(names)}）"]
@@ -542,6 +661,13 @@ def check_workflow(name: str, text: str) -> list[str]:
     if name == "plan.yml":
         results["plan_output"] = check_plan_output(text)
         results["plan_paths"] = check_plan_paths(text)
+        if not results["job_layout"]:
+            results["plan_order"] = check_plan_order(text)
+            results["plan_google_vars"] = check_google_vars(text, "plan", "plan")
+    if name == "deploy.yml" and not results["job_layout"]:
+        results["deploy_order"] = check_deploy_order(text)
+        results["deploy_google_vars"] = check_google_vars(text, "deploy", "apply")
+        results["deploy_web_env"] = check_web_build_env(text)
     if name == "test.yml" and not results["job_layout"]:
         results["terraform_judge"] = check_terraform_judge(text)
     return [f"[{kind}] {v}" for kind, vs in results.items() for v in vs]
@@ -609,6 +735,19 @@ class RealWorkflowsTest(unittest.TestCase):
         self.assertEqual(check_concurrency("plan.yml", self.workflows["plan.yml"]), [])
         self.assertEqual(check_plan_paths(self.workflows["plan.yml"]), [])
 
+    def test_deployは依存のインストール_APIのビルド_apply_画面のビルド_サイトの配置の順(self):
+        self.assertEqual(check_deploy_order(self.workflows["deploy.yml"]), [])
+
+    def test_planは依存のインストールとAPIのビルドがAWSの認証情報より前にある(self):
+        self.assertEqual(check_plan_order(self.workflows["plan.yml"]), [])
+
+    def test_Googleの3つの値はplanもdeployもenvのTF_VARで渡す(self):
+        self.assertEqual(check_google_vars(self.workflows["plan.yml"], "plan", "plan"), [])
+        self.assertEqual(check_google_vars(self.workflows["deploy.yml"], "deploy", "apply"), [])
+
+    def test_画面のビルドにCognitoのドメインとクライアントIDとTurnstileのサイトキーが渡る(self):
+        self.assertEqual(check_web_build_env(self.workflows["deploy.yml"]), [])
+
     def test_testのterraformジョブの判定ステップにifが付いていない(self):
         self.assertEqual(check_terraform_judge(self.workflows["test.yml"]), [])
 
@@ -637,6 +776,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@{SHA_A} # v7.0.1
+      - uses: pnpm/action-setup@{SHA_A} # v6.1.0
+      - uses: actions/setup-node@{SHA_A} # v7.1.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api build
       - uses: aws-actions/configure-aws-credentials@{SHA_B} # v6.3.0
         with:
           role-to-assume: ${{{{ secrets.AWS_PLAN_ROLE_ARN }}}}
@@ -645,6 +788,9 @@ jobs:
       - name: plan
         env:
           TF_STATE_BUCKET: ${{{{ secrets.TF_STATE_BUCKET }}}}
+          TF_VAR_google_client_id: ${{{{ secrets.GOOGLE_CLIENT_ID }}}}
+          TF_VAR_google_client_secret: ${{{{ secrets.GOOGLE_CLIENT_SECRET }}}}
+          TF_VAR_cognito_domain_prefix: ${{{{ secrets.COGNITO_DOMAIN_PREFIX }}}}
         run: |
           terraform init -backend-config="bucket=$TF_STATE_BUCKET"
           terraform plan -no-color
@@ -671,12 +817,30 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@{SHA_A} # v7.0.1
+      - uses: pnpm/action-setup@{SHA_A} # v6.1.0
+      - uses: actions/setup-node@{SHA_A} # v7.1.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api build
       - uses: aws-actions/configure-aws-credentials@{SHA_B} # v6.3.0
         with:
           role-to-assume: ${{{{ secrets.AWS_DEPLOY_ROLE_ARN }}}}
           aws-region: ${{{{ secrets.AWS_REGION }}}}
           mask-aws-account-id: true
-      - run: terraform apply -auto-approve
+      - name: apply
+        env:
+          TF_VAR_google_client_id: ${{{{ secrets.GOOGLE_CLIENT_ID }}}}
+          TF_VAR_google_client_secret: ${{{{ secrets.GOOGLE_CLIENT_SECRET }}}}
+          TF_VAR_cognito_domain_prefix: ${{{{ secrets.COGNITO_DOMAIN_PREFIX }}}}
+        run: terraform apply -auto-approve
+      - name: web
+        env:
+          VITE_TURNSTILE_SITE_KEY: ${{{{ secrets.TURNSTILE_SITE_KEY }}}}
+        run: |
+          VITE_COGNITO_DOMAIN="$(terraform -chdir=infra/app output -raw cognito_domain_url)"
+          VITE_COGNITO_CLIENT_ID="$(terraform -chdir=infra/app output -raw cognito_client_id)"
+          export VITE_COGNITO_DOMAIN VITE_COGNITO_CLIENT_ID
+          pnpm --filter web build
+      - run: aws s3 sync apps/web/dist s3://example
 """
 
 GOOD_TEST = f"""\
@@ -918,6 +1082,132 @@ class PlanOutputTest(unittest.TestCase):
             check_plan_output("")
 
 
+class PlanBuildStepsTest(unittest.TestCase):
+    def test_pnpmとsetup_nodeは許し_upload_artifactなど他は引き続き検出する(self):
+        self.assertEqual(check_plan_output(GOOD_PLAN), [])
+        self.assertIn("pnpm/action-setup", PLAN_ALLOWED_ACTIONS)
+        self.assertIn("actions/setup-node", PLAN_ALLOWED_ACTIONS)
+        for action in ("actions/upload-artifact", "actions/cache", "actions/setup-python"):
+            with self.subTest(action=action):
+                text = mutate(GOOD_PLAN, "      - name: plan\n", f"      - uses: {action}@{SHA_A} # v4.0.0\n      - name: plan\n")
+                self.assertTrue(check_plan_output(text))
+
+    def test_タグ固定のpnpmやsetup_nodeは検出する(self):
+        text = mutate(GOOD_PLAN, f"pnpm/action-setup@{SHA_A} # v6.1.0", "pnpm/action-setup@v6")
+        self.assertTrue(check_pinned_uses(text))
+        text = mutate(GOOD_PLAN, f"actions/setup-node@{SHA_A} # v7.1.0", "actions/setup-node@v7")
+        self.assertTrue(check_pinned_uses(text))
+
+    def test_planはinstallもapiのビルドもAWSの認証情報より前に置く(self):
+        self.assertEqual(check_plan_order(GOOD_PLAN), [])
+        # 認証情報を取った後に置く
+        moved = mutate(GOOD_PLAN, "      - run: pnpm --filter api build\n", "")
+        moved = mutate(moved, "      - name: plan\n", "      - run: pnpm --filter api build\n      - name: plan\n")
+        self.assertTrue(check_plan_order(moved))
+        # 無い
+        self.assertTrue(check_plan_order(mutate(GOOD_PLAN, "      - run: pnpm --filter api build\n", "")))
+        self.assertTrue(check_plan_order(mutate(GOOD_PLAN, "      - run: pnpm install --frozen-lockfile\n", "")))
+        # install より前に api build がある
+        before = "      - run: pnpm install --frozen-lockfile\n      - run: pnpm --filter api build\n"
+        after = "      - run: pnpm --filter api build\n      - run: pnpm install --frozen-lockfile\n"
+        self.assertTrue(check_plan_order(mutate(GOOD_PLAN, before, after)))
+
+
+class PlanBuildAfterCredentialsTest(unittest.TestCase):
+    def test_認証情報の後にビルドを足したら検出する(self):
+        for command in ("pnpm --filter api build", "pnpm --filter web build", "npx something", "node script.js"):
+            with self.subTest(command=command):
+                text = mutate(GOOD_PLAN, "      - name: plan\n", f"      - run: {command}\n      - name: plan\n")
+                self.assertTrue(check_plan_order(text))
+
+    def test_行末のコメントに隠したビルドは数えない(self):
+        text = mutate(GOOD_PLAN, "      - run: pnpm --filter api build\n", "      - run: echo skip # pnpm --filter api build\n")
+        self.assertTrue(check_plan_order(text))
+
+
+class DeployOrderTest(unittest.TestCase):
+    def test_正しい順は通る(self):
+        self.assertEqual(check_deploy_order(GOOD_DEPLOY), [])
+
+    def test_画面のビルドがapplyより前なら検出する(self):
+        i = GOOD_DEPLOY.index("      - name: web\n")
+        j = GOOD_DEPLOY.index("      - run: aws s3 sync")
+        web_step = GOOD_DEPLOY[i:j]
+        moved = GOOD_DEPLOY.replace(web_step, "").replace("      - name: apply\n", web_step + "      - name: apply\n")
+        self.assertTrue(check_deploy_order(moved))
+
+    def test_APIのビルドがapplyより後なら検出する(self):
+        moved = mutate(GOOD_DEPLOY, "      - run: pnpm --filter api build\n", "")
+        moved = mutate(moved, "      - name: web\n", "      - run: pnpm --filter api build\n      - name: web\n")
+        self.assertTrue(check_deploy_order(moved))
+
+    def test_サイトの配置が画面のビルドより前なら検出する(self):
+        sync = "      - run: aws s3 sync apps/web/dist s3://example\n"
+        moved = mutate(GOOD_DEPLOY, sync, "")
+        moved = mutate(moved, "      - name: web\n", sync + "      - name: web\n")
+        self.assertTrue(check_deploy_order(moved))
+
+    def test_installが無ければ検出する(self):
+        self.assertTrue(check_deploy_order(mutate(GOOD_DEPLOY, "      - run: pnpm install --frozen-lockfile\n", "")))
+
+    def test_いずれかのステップが無ければ検出する(self):
+        for step in ("      - run: pnpm --filter api build\n", "      - run: aws s3 sync apps/web/dist s3://example\n"):
+            with self.subTest(step=step):
+                self.assertTrue(check_deploy_order(mutate(GOOD_DEPLOY, step, "")))
+
+    def test_ジョブが無ければ落ちる(self):
+        with self.assertRaises(WorkflowFormatError):
+            check_deploy_order(GOOD_PLAN)
+
+
+class GoogleVarsTest(unittest.TestCase):
+    def test_正しい渡し方は通る(self):
+        self.assertEqual(check_google_vars(GOOD_PLAN, "plan", "plan"), [])
+        self.assertEqual(check_google_vars(GOOD_DEPLOY, "deploy", "apply"), [])
+
+    def test_3つのどれかが欠けたら検出する(self):
+        for var in GOOGLE_VARS:
+            with self.subTest(var=var):
+                for text, job, command in ((GOOD_PLAN, "plan", "plan"), (GOOD_DEPLOY, "deploy", "apply")):
+                    lines = [line for line in text.splitlines(keepends=True) if var not in line]
+                    self.assertTrue(check_google_vars("".join(lines), job, command))
+
+    def test_別のSecretsを渡したら検出する(self):
+        text = mutate(GOOD_PLAN, "secrets.GOOGLE_CLIENT_SECRET", "secrets.TF_STATE_BUCKET")
+        self.assertTrue(check_google_vars(text, "plan", "plan"))
+
+    def test_var引数で渡したら検出する(self):
+        text = mutate(GOOD_PLAN, "          terraform plan -no-color", '          terraform plan -no-color -var="google_client_id=$TF_VAR_google_client_id"')
+        self.assertTrue(check_google_vars(text, "plan", "plan"))
+        text = mutate(GOOD_DEPLOY, "run: terraform apply -auto-approve", "run: terraform apply -auto-approve -var cognito_domain_prefix=x")
+        self.assertTrue(check_google_vars(text, "deploy", "apply"))
+
+    def test_runに埋め込んだら既存の検査が検出する(self):
+        text = mutate(GOOD_DEPLOY, "run: terraform apply -auto-approve", 'run: TF_VAR_google_client_id="${{ secrets.GOOGLE_CLIENT_ID }}" terraform apply -auto-approve')
+        self.assertTrue(check_secrets_and_expressions(text))
+
+    def test_terraformのステップが無ければ検出する(self):
+        self.assertTrue(check_google_vars(GOOD_TEST, "test", "plan"))
+
+
+class WebBuildEnvTest(unittest.TestCase):
+    def test_正しい渡し方は通る(self):
+        self.assertEqual(check_web_build_env(GOOD_DEPLOY), [])
+
+    def test_Turnstileのサイトキーが無ければ検出する(self):
+        self.assertTrue(check_web_build_env(mutate(GOOD_DEPLOY, "          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}\n", "")))
+
+    def test_CognitoのドメインかクライアントIDの出力を使っていなければ検出する(self):
+        self.assertTrue(check_web_build_env(mutate(GOOD_DEPLOY, "output -raw cognito_domain_url", "output -raw distribution_domain_name")))
+        self.assertTrue(check_web_build_env(mutate(GOOD_DEPLOY, "output -raw cognito_client_id", "output -raw distribution_id")))
+
+    def test_exportが無ければ検出する(self):
+        self.assertTrue(check_web_build_env(mutate(GOOD_DEPLOY, "          export VITE_COGNITO_DOMAIN VITE_COGNITO_CLIENT_ID\n", "")))
+
+    def test_画面のビルドが無ければ検出する(self):
+        self.assertTrue(check_web_build_env(mutate(GOOD_DEPLOY, "          pnpm --filter web build\n", "")))
+
+
 class AwsCredentialsTest(unittest.TestCase):
     def test_maskが無ければ検出する(self):
         self.assertTrue(check_aws_credentials("plan.yml", mutate(GOOD_PLAN, "          mask-aws-account-id: true\n", "")))
@@ -953,7 +1243,7 @@ class SecretsAndExpressionsTest(unittest.TestCase):
     def test_runの中のSecretsは1行でも複数行でも検出する(self):
         multi = mutate(GOOD_PLAN, "          terraform plan -no-color", '          echo "${{ secrets.TF_STATE_BUCKET }}"')
         self.assertTrue(check_secrets_and_expressions(multi))
-        single = mutate(GOOD_DEPLOY, "- run: terraform apply -auto-approve", '- run: echo "${{ secrets.AWS_REGION }}"')
+        single = mutate(GOOD_DEPLOY, "run: terraform apply -auto-approve", 'run: echo "${{ secrets.AWS_REGION }}"')
         self.assertTrue(check_secrets_and_expressions(single))
 
     def test_runの中のgithub_eventは検出する(self):
@@ -975,7 +1265,7 @@ class SecretsAndExpressionsTest(unittest.TestCase):
             with self.subTest(expr=expr):
                 text = mutate(GOOD_PLAN, "          terraform plan -no-color", f"          echo {expr}")
                 self.assertTrue(check_secrets_and_expressions(text))
-        quoted = mutate(GOOD_DEPLOY, "- run: terraform apply -auto-approve", '- "run": echo "${{ github.event.x }}"')
+        quoted = mutate(GOOD_DEPLOY, "run: terraform apply -auto-approve", '"run": echo "${{ github.event.x }}"')
         self.assertTrue(check_secrets_and_expressions(quoted))
 
     def test_runが1件も無ければ検出する(self):
@@ -983,7 +1273,7 @@ class SecretsAndExpressionsTest(unittest.TestCase):
         self.assertTrue(check_secrets_and_expressions(GOOD_TEST.replace("run: ", "name: ")))
 
     def test_行末のコメントに隠した式も検出する(self):
-        text = mutate(GOOD_DEPLOY, "- run: terraform apply -auto-approve", "- run: echo ok # ${{ secrets.AWS_REGION }}")
+        text = mutate(GOOD_DEPLOY, "run: terraform apply -auto-approve", "run: echo ok # ${{ secrets.AWS_REGION }}")
         self.assertTrue(check_secrets_and_expressions(text))
 
     def test_envの中のSecretsやifの中のgithub_eventは許す(self):

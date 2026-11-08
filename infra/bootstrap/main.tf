@@ -27,6 +27,16 @@ locals {
   deploy_role_name = "${var.project_name}-${var.environment}-iam-deploy"
   plan_role_name   = "${var.project_name}-${var.environment}-iam-plan"
 
+  # 共有の API（infra/app の sharing.tf）の部品の名前。ロールの権限は、前方一致でなくこの正確な名前に絞る。
+  # infra/app 側の名前と同じ文字列で、双方のテストが同じ文字列を確かめる
+  lambda_api_role_name         = "${var.project_name}-${var.environment}-iam-lambda-api"
+  lambda_api_name              = "${var.project_name}-${var.environment}-lambda-api"
+  shares_table_name            = "${var.project_name}-${var.environment}-dynamodb-shares"
+  owner_index_name             = "owner-index"
+  cloudfront_spa_function_name = "${var.project_name}-${var.environment}-cloudfront-spa"
+  # Turnstile の秘密鍵。値は Terraform で作らず手で入れる（状態ファイルに入れないため）。実行ロールは読み取りだけ
+  turnstile_secret_parameter = "/${var.project_name}/${var.environment}/turnstile-secret"
+
   # <プロジェクト名>-<環境名>-budgets-<用途>
   budget_name = "${var.project_name}-${var.environment}-budgets-monthly"
 }

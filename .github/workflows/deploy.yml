@@ -1,4 +1,4 @@
-# main への push で、テスト → インフラの反映 → サイトの配置を行う。手動の起動（workflow_dispatch）は付けない。
+# main への push で、テスト → API のビルド → インフラの反映 → 画面のビルド → サイトの配置を行う。手動の起動（workflow_dispatch）は付けない。
 # 守る条件は .github/tests/test_workflows.py、理由は docs/adr/0027-ci-cd-with-three-workflows.md
 name: deploy
 
@@ -39,7 +39,8 @@ jobs:
           node-version-file: .node-version
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter web build
+      # Lambda に載せる zip の元。apply が読むので apply の前に作る。画面のビルドは apply の出力を使うので後に回す
+      - run: pnpm --filter api build
 
       # ラッパーは標準出力に行を足し、terraform output -raw の値を壊す
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -59,6 +60,10 @@ jobs:
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
+          # 共有の部品（Cognito など）の元。3 つとも未設定なら共有の部品は作られない（docs/adr/0035-share-by-unguessable-url-with-google-login.md）。-var では渡さない
+          TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_VAR_cognito_domain_prefix: ${{ secrets.COGNITO_DOMAIN_PREFIX }}
         run: |
           set -euo pipefail
           terraform init -input=false \
@@ -66,6 +71,21 @@ jobs:
             -backend-config="key=app/terraform.tfstate" \
             -backend-config="region=$AWS_REGION"
           terraform apply -auto-approve -input=false -lock-timeout=5m -no-color -var="region=$AWS_REGION"
+
+      # 共有の設定を画面に渡す。未設定のあいだは空文字で、画面に共有のボタンを出さない。
+      # 値はビルド成果物に入る公開の値で、apply の出力にも出る（sensitive でない）。ここでの ::add-mask:: はこれ以降のログでの念のため（空でないときだけ）
+      - name: 画面をビルドする
+        env:
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+        run: |
+          set -euo pipefail
+          VITE_COGNITO_DOMAIN="$(terraform -chdir=infra/app output -raw cognito_domain_url)"
+          VITE_COGNITO_CLIENT_ID="$(terraform -chdir=infra/app output -raw cognito_client_id)"
+          for value in "$VITE_COGNITO_DOMAIN" "$VITE_COGNITO_CLIENT_ID"; do
+            if [ -n "$value" ]; then echo "::add-mask::$value"; fi
+          done
+          export VITE_COGNITO_DOMAIN VITE_COGNITO_CLIENT_ID
+          pnpm --filter web build
 
       # 値は echo せず、::add-mask:: の行だけを出して伏せる。以降は同じステップの中で使う（ステップをまたぐと伏せ字が効くか不確かなため）
       - name: サイトを置いてキャッシュを消す
