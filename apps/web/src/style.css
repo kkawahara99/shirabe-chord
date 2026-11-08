@@ -679,6 +679,31 @@ button.step-remove {
   border: none;
 }
 
+/* 記号のボタンの ::after がカード全体を覆うので、その上に重ねて押せるようにする */
+button.step-play {
+  position: relative;
+  z-index: 1;
+}
+
+/* 再生中のカード。「選択中」（背景と枠）と見分けがつくよう、上端に太い線を付ける */
+.step.playing {
+  box-shadow: inset 0 6px 0 var(--accent); /* 枠の太さを変えると、中身が下がって行の高さが揺れる */
+}
+
+.tempo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tempo input {
+  width: 5rem;
+}
+
+.sound-note {
+  flex-basis: 100%;
+}
+
 .step .diagram {
   width: 100%;
 }
@@ -833,6 +858,7 @@ button.step-remove {
   .dialog-backdrop,
   .share-actions,
   button.step-remove, /* button:has(.icon) の display に負けないよう、種類まで書く */
+  button.step-play,
   .step-add,
   .rail-button,
   .score-actions {

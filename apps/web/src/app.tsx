@@ -6,6 +6,7 @@ import {
   lowerSymbol,
   MAX_PROGRESSION_CHORDS,
   optimizeSymbols,
+  soundingNotes,
   TENSIONS,
   tensionsConflictingWith,
   type Accidental,
@@ -27,6 +28,8 @@ import type { ImportedScore } from "./import-score.ts";
 import { parseLoginReturn } from "./login.ts";
 import { handPositionLabel, progressionText } from "./progression-text.ts";
 import { pinMarksOf, readSnapshot, restorePins, type AfterAction } from "./resume.ts";
+import { normalizeTempo, DEFAULT_TEMPO, MAX_TEMPO, MIN_TEMPO } from "./tempo.ts";
+import { usePlayback } from "./use-playback.ts";
 import { MinePage } from "./mine-page.tsx";
 import { parseRoute } from "./route.ts";
 import { browserStorage } from "./session-store.ts";
@@ -339,6 +342,26 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
 
   useEffect(() => setCopyStatus(null), [joined, capo, pins]);
 
+  const sound = usePlayback();
+  /** テンポの入力欄の文字。丸めるのは、フォーカスが外れたときと再生を押したとき。 */
+  const [tempoText, setTempoText] = useState(String(DEFAULT_TEMPO));
+  const [loop, setLoop] = useState(false);
+  // 進行・カポ・固定が変わったら止める（鳴らしている押さえ方が、画面のものと食い違うため）。別の画面へ移っても止める（操作列が消えて止められなくなる）
+  useEffect(() => sound.stop(), [joined, capo, pins, route.kind]); // eslint-disable-line react-hooks/exhaustive-deps -- stop は変わらない
+  const soundDisabled = !result.ok || sound.unavailable;
+  const playProgression = () => {
+    if (!result.ok) return;
+    const tempo = normalizeTempo(tempoText);
+    setTempoText(String(tempo));
+    sound.playProgression(
+      result.steps.map((step) => soundingNotes(step.voicing, capo)),
+      { tempo, loop },
+    );
+  };
+  const playChord = (index: number) => {
+    if (result.ok) sound.playChord(soundingNotes(result.steps[index]!.voicing, capo));
+  };
+
   const copyText = async () => {
     if (!result.ok) return;
     try {
@@ -523,6 +546,34 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                 {copyStatus === "copied" && "コピーしました"}
                 {copyStatus === "failed" && "コピーできませんでした"}
               </p>
+              <button type="button" disabled={soundDisabled} onClick={playProgression}>
+                <Icon name="play" />
+                進行を鳴らす
+              </button>
+              <button type="button" disabled={!sound.state.playing} onClick={sound.stop}>
+                <Icon name="stop" />
+                止める
+              </button>
+              <label className="tempo">
+                テンポ
+                <input
+                  type="number"
+                  min={MIN_TEMPO}
+                  max={MAX_TEMPO}
+                  step="any"
+                  value={tempoText}
+                  disabled={sound.state.playing}
+                  aria-describedby="tempo-range"
+                  onChange={(event) => setTempoText(event.target.value)}
+                  onBlur={() => setTempoText(String(normalizeTempo(tempoText)))}
+                />
+                <span id="tempo-range">（{MIN_TEMPO}〜{MAX_TEMPO}）</span>
+              </label>
+              <label className="choice">
+                <input type="checkbox" checked={loop} disabled={sound.state.playing} onChange={(event) => setLoop(event.target.checked)} />
+                ループ
+              </label>
+              {sound.unavailable && <p className="sound-note">この環境では音を出せません</p>}
             </div>
             {capo > 0 && <p className="capo-note">カポ{capo}</p>}
             {!result.ok && (
@@ -538,7 +589,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
               {symbols.map((symbol, i) => {
                 const step = result.ok ? result.steps[i] : undefined;
                 return (
-                  <li key={i} className="step">
+                  <li key={i} className={sound.state.active === i ? "step playing" : "step"}>
                     <span className="step-number">{i + 1}</span>
                     <button
                       type="button"
@@ -556,6 +607,10 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                     {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
                     {step && capo > 0 && <p className="step-shape">{displaySymbol(step.symbol)}の形</p>}
                     {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
+                    <button type="button" className="step-play" disabled={soundDisabled} onClick={() => playChord(i)}>
+                      <Icon name="play" />
+                      鳴らす
+                    </button>
                     <button
                       type="button"
                       className="step-remove"
