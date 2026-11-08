@@ -35,6 +35,8 @@ export type {
   OptimizeProgressionResult,
   ProgressionStep,
 } from "./progression.ts";
+export { soundingNotes } from "./sounding.ts";
+export type { SoundingNote } from "./sounding.ts";
 export { listShapesByLowestFret } from "./shapes.ts";
 export type { ListShapesResult, Shape } from "./shapes.ts";
 export {
