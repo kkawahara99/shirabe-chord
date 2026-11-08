@@ -359,6 +359,25 @@ button {
   cursor: pointer;
 }
 
+/* 文字に添える図。色は文字色（currentColor）に従い、大きさは文字に合わせる */
+.icon {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+}
+
+button:has(.icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+}
+
+button.step-remove .icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
 button:disabled {
   color: var(--text-sub);
   cursor: not-allowed;
@@ -758,7 +777,7 @@ button.step-remove {
   }
 
   .step {
-    padding-top: 2.75rem; /* 44px の「×」が、記号のボタンと重ならないように */
+    padding-top: 2.75rem; /* 44px の削除のボタンが、記号のボタンと重ならないように */
   }
 }
 
@@ -813,7 +832,7 @@ button.step-remove {
   .site-footer,
   .dialog-backdrop,
   .share-actions,
-  .step-remove,
+  button.step-remove, /* button:has(.icon) の display に負けないよう、種類まで書く */
   .step-add,
   .rail-button,
   .score-actions {
@@ -863,7 +882,7 @@ button.step-remove {
 
   .step,
   .step:has(.step-select[aria-pressed="true"]) {
-    padding-top: 0.5rem; /* 画面の狭い幅で「×」のために空けた余白は、印刷では要らない */
+    padding-top: 0.5rem; /* 画面の狭い幅で削除のボタンのために空けた余白は、印刷では要らない */
     break-inside: avoid;
     border: 1px solid #000;
   }

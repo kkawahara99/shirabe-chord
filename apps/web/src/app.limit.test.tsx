@@ -16,7 +16,7 @@ describe("App（コードの個数の上限）", () => {
       within(screen.getByRole("list", { name: "コード進行" }))
         .getAllByRole("button")
         .filter((button) => button.hasAttribute("aria-pressed"));
-    const addButton = screen.getByRole("button", { name: "＋ コードを追加" }) as HTMLButtonElement;
+    const addButton = screen.getByRole("button", { name: "コードを追加" }) as HTMLButtonElement;
     for (let i = 0; i < 60; i++) fireEvent.click(addButton);
     expect(chordButtons()).toHaveLength(64);
     expect(addButton.disabled).toBe(true);

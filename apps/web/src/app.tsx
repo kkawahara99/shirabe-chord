@@ -22,6 +22,7 @@ import { AuthControl } from "./auth-control.tsx";
 import { readAuthConfig, type AuthConfig } from "./auth-config.ts";
 import { AuthProvider } from "./auth-context.tsx";
 import { displayQuality, displaySymbol, displayTension } from "./display-symbol.ts";
+import { Icon } from "./icon.tsx";
 import type { ImportedScore } from "./import-score.ts";
 import { parseLoginReturn } from "./login.ts";
 import { handPositionLabel, progressionText } from "./progression-text.ts";
@@ -473,6 +474,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                   <h2 id="editor-title">{selected + 1}番目のコードを編集</h2>
                   <span className="editor-symbol">{displaySymbol(symbols[selected]!)}</span>
                   <button type="button" ref={closeButton} onClick={closePanel}>
+                    <Icon name="close" />
                     閉じる
                   </button>
                 </div>
@@ -505,9 +507,11 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
           <section aria-label="進行の押さえ方" className="score">
             <div className="score-actions">
               <button type="button" disabled={!result.ok} onClick={() => window.print()}>
+                <Icon name="print" />
                 印刷
               </button>
               <button type="button" disabled={!result.ok} onClick={copyText}>
+                <Icon name="copy" />
                 テキストでコピー
               </button>
               {config && (
@@ -559,14 +563,15 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                       disabled={chords.length <= 1}
                       onClick={() => removeChord(i)}
                     >
-                      ×
+                      <Icon name="trash" />
                     </button>
                   </li>
                 );
               })}
               <li className="step-add">
                 <button type="button" disabled={chords.length >= MAX_PROGRESSION_CHORDS} onClick={addChord}>
-                  ＋ コードを追加
+                  <Icon name="add" />
+                  コードを追加
                 </button>
               </li>
             </ul>

@@ -97,7 +97,7 @@ const checkbox = (label: string) =>
 const pick = (groupName: string, label: string) => fireEvent.click(radio(groupName, label));
 const toggle = (label: string) => fireEvent.click(checkbox(label));
 const select = (index: number) => fireEvent.click(chordButtons()[index]!);
-const add = () => fireEvent.click(screen.getByRole("button", { name: "＋ コードを追加" }));
+const add = () => fireEvent.click(screen.getByRole("button", { name: "コードを追加" }));
 const remove = (n: number) => fireEvent.click(screen.getByRole("button", { name: `${n}番目のコードを削除` }));
 
 describe("App（画面全体）", () => {
@@ -234,7 +234,7 @@ describe("App（画面全体）", () => {
     expect(checkbox("9").checked).toBe(false);
   });
 
-  it("「＋ コードを追加」で末尾に C が増え、増えたコードが選ばれる", () => {
+  it("「コードを追加」で末尾に C が増え、増えたコードが選ばれる", () => {
     render(<App />);
     add();
     expect(chordSymbols()).toEqual(["C", "Am", "F", "G7", "C"]);
@@ -506,11 +506,11 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(card.classList.contains("step")).toBe(true);
   });
 
-  it("コード進行の一覧は、コードの数だけカードを並べ、最後の項目に「＋ コードを追加」を置く", () => {
+  it("コード進行の一覧は、コードの数だけカードを並べ、最後の項目に「コードを追加」を置く", () => {
     render(<App />);
     const items = cardItems();
     expect(items).toHaveLength(5);
-    expect(within(items[4]!).getByRole("button", { name: "＋ コードを追加" })).toBeTruthy();
+    expect(within(items[4]!).getByRole("button", { name: "コードを追加" })).toBeTruthy();
     expect(items.slice(0, 4).every((item) => item.classList.contains("step"))).toBe(true);
   });
 
@@ -678,7 +678,7 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(pressedTab()).toBe("コード");
   });
 
-  it("閉じている間に「＋ コードを追加」を押すと、増えたコードで開く", () => {
+  it("閉じている間に「コードを追加」を押すと、増えたコードで開く", () => {
     render(<App />);
     closePanel();
     add();
@@ -723,7 +723,7 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(document.activeElement).toBe(closeButton());
   });
 
-  it("カード・「＋ コードを追加」・手の位置のボタンで開いたときは、「閉じる」にフォーカスを動かさない", () => {
+  it("カード・「コードを追加」・手の位置のボタンで開いたときは、「閉じる」にフォーカスを動かさない", () => {
     render(<App />);
     closePanel();
     select(1);
@@ -1183,7 +1183,7 @@ describe("印刷とコピー", () => {
     render(<App />);
     await click(copyButton());
     expect(status()).toBe("コピーしました");
-    fireEvent.click(screen.getByRole("button", { name: "＋ コードを追加" }));
+    fireEvent.click(screen.getByRole("button", { name: "コードを追加" }));
     expect(status()).toBe("");
   });
 

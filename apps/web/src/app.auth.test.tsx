@@ -50,7 +50,7 @@ const pinnedPositions = () =>
 
 /** 進行を「C Am F G7 C」にし、カポ 2 にして、1 番目のコードの押さえ方を固定する。 */
 function arrange() {
-  fireEvent.click(screen.getByRole("button", { name: "＋ コードを追加" }));
+  fireEvent.click(screen.getByRole("button", { name: "コードを追加" }));
   fireEvent.change(capoSelect(), { target: { value: "2" } });
   fireEvent.click(chordButtons()[0]!);
   fireEvent.click(screen.getByRole("button", { name: "押さえ方" }));
@@ -392,7 +392,7 @@ describe("ルーティング", () => {
   it("メニューの「共有した譜面」で /mine の画面になり、「トップへ戻る」で、組んでいた進行がそのまま戻る", () => {
     loggedIn();
     render(<App config={CONFIG} />);
-    fireEvent.click(screen.getByRole("button", { name: "＋ コードを追加" }));
+    fireEvent.click(screen.getByRole("button", { name: "コードを追加" }));
     fireEvent.click(screen.getByRole("button", { name: "アカウントのメニュー" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "共有した譜面" }));
 
