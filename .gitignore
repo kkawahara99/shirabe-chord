@@ -25,6 +25,9 @@ venv/
 # TypeScript ビルド情報
 *.tsbuildinfo
 
+# vitest が書く結果ファイル。worktree に未追跡で出ると、マージ済みでも回収されなくなる
+.vitest/
+
 # 環境変数・秘密情報
 .env
 .env.*
