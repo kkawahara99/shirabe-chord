@@ -36,6 +36,26 @@ export const ICONS = {
       <path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4" />
     </>
   ),
+  open: (
+    <>
+      <path d="M14 4h6v6M20 4l-9 9" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z" />
+      <path d="M14 7l3 3" />
+    </>
+  ),
+  back: <path d="M19 12H5M11 6l-6 6 6 6" />,
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" />
+    </>
+  ),
+  moon: <path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof ICONS;

@@ -8,11 +8,15 @@
   --accent-bg: #edf0ff;
   --warn: #a8430a;
   --on-accent: #ffffff;
+  --danger: #b3261e;
+  --on-danger: #ffffff;
 }
 
-/* 暗い配色は screen だけ。印刷は変数を戻さなくても白地のまま。 */
+/* 暗い配色は screen だけ。印刷は変数を戻さなくても白地のまま。
+   OS が暗いときは、画面で「ライト」を選んでいない限り暗くする。画面で「ダーク」を選んだときは、OS に関わらず暗くする
+   （同じ値を 2 か所に持つので、dark-mode.test.ts が一致を守る） */
 @media screen and (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark; /* フォーム部品とスクロールバーを合わせる */
     --bg: #12141a;
     --surface: #1c1f27;
@@ -23,6 +27,25 @@
     --accent-bg: #262c4f;
     --warn: #f0a066;
     --on-accent: #12141a;
+    --danger: #ff8a80;
+    --on-danger: #12141a;
+  }
+}
+
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark; /* フォーム部品とスクロールバーを合わせる */
+    --bg: #12141a;
+    --surface: #1c1f27;
+    --text: #e8eaf0;
+    --text-sub: #a3abb8;
+    --line: #343a46;
+    --accent: #8f9dff;
+    --accent-bg: #262c4f;
+    --warn: #f0a066;
+    --on-accent: #12141a;
+    --danger: #ff8a80;
+    --on-danger: #12141a;
   }
 }
 
@@ -375,7 +398,8 @@ button {
   height: 1.1em;
 }
 
-button:has(.icon, .google-mark) {
+button:has(.icon, .google-mark),
+a:has(.icon) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -402,6 +426,27 @@ button:disabled {
   color: var(--text-sub);
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* 確定（共有する・URL をコピー・編集する）は色を付け、「閉じる」「やめる」と見分ける。削除は赤。
+   button:disabled と詳細度が同じなので、後ろに置いて、無効のときも文字色が背景に負けないようにする */
+button.primary {
+  font-weight: bold;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button.danger {
+  font-weight: bold;
+  color: var(--on-danger);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+button.danger-outline {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 button:focus-visible,
@@ -878,6 +923,7 @@ button.step-play {
   .hand-button,
   .capo-picker,
   .auth-area,
+  button.theme-toggle,
   .site-footer,
   .dialog-backdrop,
   .share-actions,

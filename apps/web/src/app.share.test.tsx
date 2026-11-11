@@ -340,7 +340,10 @@ describe("送信", () => {
     const url = (await inDialog().findByLabelText("共有 URL")) as HTMLInputElement;
     expect(url.value).toBe(`${ORIGIN}/s/${ID}`);
     expect(url.readOnly).toBe(true);
-    fireEvent.click(inDialog().getByRole("button", { name: "URL をコピー" }));
+    const copyButton = inDialog().getByRole("button", { name: "URL をコピー" });
+    expect(copyButton.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    expect(copyButton.className).toBe("primary");
+    fireEvent.click(copyButton);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${ORIGIN}/s/${ID}`));
     await inDialog().findByText("コピーしました");
   });
@@ -373,7 +376,9 @@ describe("送信", () => {
     fireEvent.click(submitButton());
 
     await waitFor(() => expect(alertText()).toMatch(/古い共有を削除してください/));
-    fireEvent.click(inDialog().getByRole("button", { name: "共有した譜面を開く" }));
+    const openMine = inDialog().getByRole("button", { name: "共有した譜面を開く" });
+    expect(openMine.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    fireEvent.click(openMine);
     expect(dialog()).toBeNull();
     expect(window.location.pathname).toBe("/mine");
   });

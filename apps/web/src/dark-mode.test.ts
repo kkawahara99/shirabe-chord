@@ -22,6 +22,13 @@ const darkMedia = darkAt < 0 ? "" : blockAfter(css, darkAt);
 const darkQueryText = css.slice(darkAt).match(darkQuery)?.[0] ?? "";
 const darkRoot = darkMedia === "" ? "" : blockAfter(darkMedia, darkMedia.indexOf(":root"));
 const lightRoot = blockAfter(css, css.indexOf(":root"));
+// 画面で「ダーク」を選んだときの :root。OS の暗い配色とは別のブロックに同じ値を持つ。
+const manualDarkAt = css.indexOf(':root[data-theme="dark"]');
+// 無いときは空にして、例外ではなく各テストの失敗として示す。
+const manualDarkMediaAt = manualDarkAt < 0 ? -1 : css.lastIndexOf("@media screen", manualDarkAt);
+const manualDarkMedia = manualDarkAt < 0 ? "" : blockAfter(css, manualDarkMediaAt);
+const manualDarkQueryText = manualDarkAt < 0 ? "" : css.slice(manualDarkMediaAt, css.indexOf("{", manualDarkMediaAt));
+const manualDarkRoot = manualDarkAt < 0 ? "" : blockAfter(css, manualDarkAt);
 const printAt = css.indexOf("@media print");
 const printMedia = blockAfter(css, printAt);
 
@@ -32,6 +39,7 @@ const variables = (block: string): Record<string, string> =>
 
 const light = variables(lightRoot);
 const dark = variables(darkRoot);
+const manualDark = variables(manualDarkRoot);
 
 const luminance = (hex: string): number => {
   const [r, g, b] = [1, 3, 5].map((i) => {
@@ -59,6 +67,9 @@ const textPairs: [string, string][] = [
   ["--warn", "--bg"],
   ["--warn", "--accent-bg"],
   ["--on-accent", "--accent"],
+  ["--danger", "--surface"], // 削除（枠だけ）の文字
+  ["--danger", "--bg"],
+  ["--on-danger", "--danger"], // 削除する（塗り）の文字
 ];
 
 describe("暗い配色", () => {
@@ -75,6 +86,18 @@ describe("暗い配色", () => {
   it("ダークは、ライトと同じ変数名をすべて持つ（--on-accent を含む）", () => {
     expect(Object.keys(light)).toContain("--on-accent");
     expect(Object.keys(dark).sort()).toEqual(Object.keys(light).sort());
+  });
+
+  it("画面でダークを選んだときの配色は、OS が暗いときと同じ値で、color-scheme: dark も持つ", () => {
+    expect(manualDark).toEqual(dark);
+    expect(manualDarkRoot).toMatch(/color-scheme:\s*dark\s*;/);
+    expect(manualDarkQueryText).toMatch(/\bscreen\b/); // 印刷に及ばない
+    expect(manualDarkQueryText).not.toContain("prefers-color-scheme"); // OS の設定に関わらず効く
+  });
+
+  it("OS が暗くても、画面でライトを選んでいれば暗くならない（OS の暗い配色は data-theme=light を除く）", () => {
+    expect(darkMedia).toMatch(/:root:not\(\[data-theme="light"\]\)\s*\{/);
+    expect(darkMedia).not.toMatch(/data-theme="dark"/);
   });
 
   it.each([
@@ -99,6 +122,7 @@ describe("色の直書き", () => {
     const rest = css
       .replace(printMedia, "")
       .replace(darkMedia, "")
+      .replace(manualDarkMedia, "")
       .replace(lightRoot, "")
       .replace(/box-shadow:[^;]*;/g, "");
     expect(rest).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);

@@ -88,6 +88,11 @@ describe("privacy.html の中身", () => {
     expect(text).toContain("入力途中の譜面");
   });
 
+  it("画面で選んだ配色（ライトかダーク）を localStorage に置くと書く", () => {
+    expect(text).toContain("localStorage");
+    expect(text).toContain("配色");
+  });
+
   it("使う外部サービス（Google のログイン・Cloudflare Turnstile・AWS）を挙げ、Turnstile は共有のダイアログを開いたときだけと書く", () => {
     expect(text).toContain("Googleのログイン");
     expect(text).toContain("CloudflareTurnstile");

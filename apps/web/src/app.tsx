@@ -26,7 +26,7 @@ import { displayQuality, displaySymbol, displayTension } from "./display-symbol.
 import { Icon } from "./icon.tsx";
 import type { ImportedScore } from "./import-score.ts";
 import { parseLoginReturn } from "./login.ts";
-import { handPositionLabel, progressionText } from "./progression-text.ts";
+import { handPositionLabel } from "./hand-position-label.ts";
 import { pinMarksOf, readSnapshot, restorePins, type AfterAction } from "./resume.ts";
 import { normalizeTempo, DEFAULT_TEMPO, MAX_TEMPO, MIN_TEMPO } from "./tempo.ts";
 import { usePlayback } from "./use-playback.ts";
@@ -36,6 +36,7 @@ import { browserStorage } from "./session-store.ts";
 import { ShapePicker } from "./shape-picker.tsx";
 import { ShareDialog } from "./share-dialog.tsx";
 import { SharePage } from "./share-page.tsx";
+import { ThemeToggle } from "./theme-toggle.tsx";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
 const LETTERS: readonly NoteLetter[] = ["C", "D", "E", "F", "G", "A", "B"];
@@ -305,9 +306,6 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
     restored ? restorePins(restored.chords, restored.capo, restored.pins) : new Map(),
   );
 
-  /** コピーの結果。進行や手の位置が変わったら消す（古い成功を残さない）。 */
-  const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
-
   /** カポの位置（0 はカポなし）。保存しない。進行の記号は鳴らす名前のままで、押さえ方はカポをナットとみなして求める。 */
   const [capo, setCapo] = useState(restored?.capo ?? 0);
 
@@ -363,8 +361,6 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
   /** 手の位置のボタンで移るコード。固定が無ければ 1 番目。 */
   const handTarget = pins.size === 0 ? 0 : frontPin;
 
-  useEffect(() => setCopyStatus(null), [joined, capo, pins]);
-
   const sound = usePlayback();
   /** テンポの入力欄の文字。丸めるのは、フォーカスが外れたときと再生を押したとき。 */
   const [tempoText, setTempoText] = useState(String(DEFAULT_TEMPO));
@@ -383,16 +379,6 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
   };
   const playChord = (index: number) => {
     if (result.ok) sound.playChord(soundingNotes(result.steps[index]!.voicing, capo));
-  };
-
-  const copyText = async () => {
-    if (!result.ok) return;
-    try {
-      await navigator.clipboard.writeText(progressionText(handPosition, result.steps, capo > 0 ? { fret: capo, played: symbols } : undefined));
-      setCopyStatus("copied");
-    } catch {
-      setCopyStatus("failed"); // クリップボードが無い環境（TypeError）も、書き込みの拒否もここに来る
-    }
   };
 
   const hasShapes = shapes.ok && shapes.shapes.length > 0;
@@ -426,7 +412,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
   };
   /** `shape` が `null` なら、その位置を「おまかせ」に戻す。 */
   const setPin = (position: number, shape: Shape | null) => {
-    if (!shape && !pins.has(position)) return; // 変わらないときは、計算し直さない・コピーの結果の文を消さない
+    if (!shape && !pins.has(position)) return; // 変わらないときは、計算し直さない
     const next = new Map(pins);
     if (shape) next.set(position, shape);
     else next.delete(position);
@@ -494,6 +480,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
             </button>
           </>
         )}
+        <ThemeToggle />
         {config && <AuthControl onOpenMine={() => navigate("/mine")} />}
       </header>
       {route.kind === "mine" && <MinePage onHome={() => navigate("/")} onOpen={(id) => navigate(`/s/${id}`)} />}
@@ -543,20 +530,12 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                 <Icon name="print" />
                 印刷
               </button>
-              <button type="button" disabled={!result.ok} onClick={copyText}>
-                <Icon name="copy" />
-                テキストでコピー
-              </button>
               {config && (
                 <button type="button" ref={shareButton} disabled={!result.ok} onClick={() => setShareOpen(true)}>
                   <Icon name="share" />
                   共有する
                 </button>
               )}
-              <p role="status">
-                {copyStatus === "copied" && "コピーしました"}
-                {copyStatus === "failed" && "コピーできませんでした"}
-              </p>
               <button type="button" disabled={soundDisabled} onClick={playProgression}>
                 <Icon name="play" />
                 進行を鳴らす

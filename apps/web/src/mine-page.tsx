@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { useAuth } from "./auth-context.tsx";
 import { GoogleMark } from "./google-mark.tsx";
+import { Icon } from "./icon.tsx";
 import { isShareId } from "./route.ts";
 
 /** 1 人が持てる共有の数。apps/api の `MAX_SHARES_PER_OWNER` と同じ（web から api は読めないので写している）。 */
@@ -80,12 +81,15 @@ function ShareItem(props: { share: Share; onOpen: (id: string) => void; onRemove
       </span>
       <div className="mine-actions">
         <a href={`/s/${share.id}`} onClick={open}>
+          <Icon name="open" />
           開く
         </a>
         <button type="button" onClick={copyUrl}>
+          <Icon name="copy" />
           URL をコピー
         </button>
-        <button type="button" disabled={removal !== "idle"} onClick={() => setRemoval("confirming")}>
+        <button type="button" className="danger-outline" disabled={removal !== "idle"} onClick={() => setRemoval("confirming")}>
+          <Icon name="trash" />
           削除
         </button>
       </div>
@@ -96,10 +100,12 @@ function ShareItem(props: { share: Share; onOpen: (id: string) => void; onRemove
       {removal !== "idle" && (
         <div className="mine-confirm">
           <p>削除すると、この URL を開いても見られなくなります。</p>
-          <button type="button" autoFocus disabled={removal === "removing"} onClick={() => void remove()}>
+          <button type="button" className="danger" autoFocus disabled={removal === "removing"} onClick={() => void remove()}>
+            <Icon name="trash" />
             削除する
           </button>
           <button type="button" disabled={removal === "removing"} onClick={() => setRemoval("idle")}>
+            <Icon name="close" />
             やめる
           </button>
           {removal === "failed" && <p role="alert" className="problem">削除できませんでした。時間をおいて、もう一度お試しください。</p>}
@@ -177,6 +183,7 @@ export function MinePage(props: { onHome: () => void; onOpen: (id: string) => vo
         </>
       )}
       <a href="/" onClick={goHome}>
+        <Icon name="back" />
         トップへ戻る
       </a>
     </main>

@@ -9,6 +9,7 @@ import {
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "./auth-context.tsx";
 import { GoogleMark } from "./google-mark.tsx";
+import { Icon } from "./icon.tsx";
 import { isShareId } from "./route.ts";
 import { TurnstileBox } from "./turnstile-box.tsx";
 
@@ -155,7 +156,8 @@ export function ShareDialog(props: {
               共有 URL
               <input type="text" readOnly ref={urlInput} value={url} onFocus={(event) => event.currentTarget.select()} />
             </label>
-            <button type="button" onClick={copyUrl}>
+            <button type="button" className="primary" onClick={copyUrl}>
+              <Icon name="copy" />
               URL をコピー
             </button>
             <p role="status">
@@ -189,17 +191,20 @@ export function ShareDialog(props: {
                 <p>{problem.text}</p>
                 {problem.mine && (
                   <button type="button" onClick={props.onOpenMine}>
+                    <Icon name="open" />
                     共有した譜面を開く
                   </button>
                 )}
               </div>
             )}
-            <button type="submit" disabled={chords === null || token === null || sending}>
+            <button type="submit" className="primary" disabled={chords === null || token === null || sending}>
+              <Icon name="share" />
               この内容で共有する
             </button>
           </form>
         )}
         <button type="button" disabled={sending} onClick={onClose}>
+          <Icon name="close" />
           閉じる
         </button>
       </div>

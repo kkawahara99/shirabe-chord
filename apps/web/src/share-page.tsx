@@ -1,6 +1,7 @@
 import { CAPO_FRETS, lowerSymbol, MAX_PROGRESSION_CHORDS, parseChord, type SharedChord, type SharedScore, type Voicing } from "@shirabe-chord/core";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { displaySymbol } from "./display-symbol.ts";
+import { Icon } from "./icon.tsx";
 import { importScore, type ImportedScore } from "./import-score.ts";
 import { VoicingDiagram } from "./voicing-diagram.tsx";
 
@@ -104,7 +105,8 @@ export function SharePage(props: { id: string; onHome: () => void; onEdit: (impo
             })}
           </ul>
           <div className="share-actions">
-            <button type="button" disabled={imported === null} onClick={() => imported && onEdit(imported)}>
+            <button type="button" className="primary" disabled={imported === null} onClick={() => imported && onEdit(imported)}>
+              <Icon name="edit" />
               この譜面を編集する
             </button>
             {imported === null && <p role="status">この譜面は、編集画面に持ち込めません。</p>}
@@ -112,6 +114,7 @@ export function SharePage(props: { id: string; onHome: () => void; onEdit: (impo
         </>
       )}
       <a href="/" onClick={goHome}>
+        <Icon name="back" />
         トップへ戻る
       </a>
     </main>
