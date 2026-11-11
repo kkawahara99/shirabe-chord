@@ -1,4 +1,4 @@
-import { rootStrings, voicingFeatures, type Voicing } from "@shirabe-chord/core";
+import { fingering, rootStrings, type Voicing } from "@shirabe-chord/core";
 import { displaySymbol } from "./display-symbol.ts";
 
 /** 図に描くフレットの数。 */
@@ -11,10 +11,13 @@ const FRET_GAP = 28;
 const TOP = 14;
 const STRING_GAP = 16;
 const MARK_X = 22;
+/** 押さえる丸の半径。指番号を出すとき（`showFingers`）は、数字が読めるよう少し大きくする。 */
 const DOT_RADIUS = 6;
-/** ルートの印の寸法。角を少し丸めた四角（押さえる丸よりわずかに小さい）、セーハの中に重ねる小さな四角、開放の内側の丸。 */
-const ROOT_SQUARE = DOT_RADIUS * 2 - 1;
-const ROOT_OVERLAY = 7;
+const FINGER_DOT_RADIUS = 7;
+/** ポジションマークの半径（押さえる丸の大きさによらず一定）。 */
+const INLAY_RADIUS = DOT_RADIUS - 1;
+/** 指番号の文字の大きさ。 */
+const FINGER_FONT_SIZE = 10;
 const OPEN_RADIUS = 5;
 const ROOT_RING_RADIUS = 2;
 const WIDTH = NUT_X + FRET_GAP * FRET_COLUMNS + 8;
@@ -47,8 +50,6 @@ const INLAYS: Record<number, [number, number][]> = {
 const pressedFrets = (voicing: Voicing) =>
   voicing.filter((fret): fret is number => fret !== null && fret > 0);
 
-const lowestOf = (voicing: Voicing) => Math.min(...pressedFrets(voicing));
-
 /** 図の左端のフレット。押さえる最大が 5 以下なら 1、それ以外は押さえる最小。押さえるフレットが無ければ 1。 */
 export function startFretOf(voicing: Voicing): number {
   const pressed = pressedFrets(voicing);
@@ -68,12 +69,10 @@ export function voicingLabel(symbol: string, voicing: Voicing): string {
   return `${displaySymbol(symbol)}: ${voicingFrets(voicing)}`;
 }
 
-/** セーハの縦棒の範囲。成り立たないときは undefined。 */
+/** セーハの縦棒の範囲。成り立たないときは undefined。`hasBarre` でなく、指番号の規則（`fingering`）の結果に合わせる。 */
 function barreOf(voicing: Voicing, startFret: number) {
-  if (!voicingFeatures(voicing).hasBarre) return undefined;
-  const lowest = lowestOf(voicing);
-  const indices = voicing.flatMap((fret, i) => (fret === lowest ? [i] : []));
-  return { from: indices[0]!, to: indices[indices.length - 1]!, cell: lowest - startFret + 1 };
+  const barre = fingering(voicing).barre;
+  return barre && { from: barre.from, to: barre.to, fret: barre.fret, cell: barre.fret - startFret + 1 };
 }
 
 /** `hideCaption` は、見出しの記号が隣にもあるとき（カード）に重複を避けるためのもの。図のラベルは残る。 */
@@ -81,11 +80,19 @@ export function VoicingDiagram({
   symbol,
   voicing,
   hideCaption = false,
+  showFingers = false,
 }: {
   symbol: string;
   voicing: Voicing;
   hideCaption?: boolean;
+  /** 押さえる点に指番号を出す（docs/adr/0039）。セーハは棒の端（最も低い弦）に 1 を 1 か所だけ。 */
+  showFingers?: boolean;
 }) {
+  const dotRadius = showFingers ? FINGER_DOT_RADIUS : DOT_RADIUS;
+  // ルートの印。角を少し丸めた四角（押さえる丸よりわずかに小さい）と、セーハの中に重ねる小さな四角。
+  const rootSquare = dotRadius * 2 - 1;
+  const rootOverlay = showFingers ? 10 : 7;
+  const { byString } = fingering(voicing);
   const startFret = startFretOf(voicing);
   const barre = barreOf(voicing, startFret);
   const rootSet = new Set(rootStrings(symbol, voicing));
@@ -138,7 +145,7 @@ export function VoicingDiagram({
               aria-hidden="true"
               cx={cellX(cell)}
               cy={(stringY(a) + stringY(b)) / 2}
-              r={DOT_RADIUS - 1}
+              r={INLAY_RADIUS}
               fill="currentColor"
               fillOpacity={0.15}
               stroke="none"
@@ -165,11 +172,11 @@ export function VoicingDiagram({
             data-cell={barre.cell}
             data-from-string={stringNumber(barre.from)}
             data-to-string={stringNumber(barre.to)}
-            x={cellX(barre.cell) - DOT_RADIUS}
-            y={stringY(stringNumber(barre.to)) - DOT_RADIUS}
-            width={DOT_RADIUS * 2}
-            height={stringY(stringNumber(barre.from)) - stringY(stringNumber(barre.to)) + DOT_RADIUS * 2}
-            rx={DOT_RADIUS}
+            x={cellX(barre.cell) - dotRadius}
+            y={stringY(stringNumber(barre.to)) - dotRadius}
+            width={dotRadius * 2}
+            height={stringY(stringNumber(barre.from)) - stringY(stringNumber(barre.to)) + dotRadius * 2}
+            rx={dotRadius}
             fill="currentColor"
             stroke="none"
           />
@@ -210,7 +217,7 @@ export function VoicingDiagram({
           const cell = fret - startFret + 1;
           const x = cellX(cell);
           // 棒の外のルートは丸を四角に置き換える。棒の中は丸を残し、上に小さな四角を重ねる（下の overlay）。
-          if (isRoot && !(barre && fret === lowestOf(voicing))) {
+          if (isRoot && !(barre && fret === barre.fret)) {
             return (
               <rect
                 key={i}
@@ -218,10 +225,10 @@ export function VoicingDiagram({
                 data-string={string}
                 data-cell={cell}
                 {...rootAttr}
-                x={x - ROOT_SQUARE / 2}
-                y={y - ROOT_SQUARE / 2}
-                width={ROOT_SQUARE}
-                height={ROOT_SQUARE}
+                x={x - rootSquare / 2}
+                y={y - rootSquare / 2}
+                width={rootSquare}
+                height={rootSquare}
                 rx={2}
                 fill="currentColor"
                 stroke="none"
@@ -237,7 +244,7 @@ export function VoicingDiagram({
               {...rootAttr}
               cx={x}
               cy={y}
-              r={DOT_RADIUS}
+              r={dotRadius}
               fill="currentColor"
               stroke="none"
             />
@@ -247,22 +254,47 @@ export function VoicingDiagram({
         {barre &&
           voicing.flatMap((fret, i) => {
             const string = stringNumber(i);
-            if (fret !== lowestOf(voicing) || !rootSet.has(string)) return [];
+            if (fret !== barre.fret || !rootSet.has(string)) return [];
             return (
               <rect
                 key={`overlay-${i}`}
                 data-mark="root-overlay"
                 data-string={string}
                 aria-hidden="true"
-                x={cellX(barre.cell) - ROOT_OVERLAY / 2}
-                y={stringY(string) - ROOT_OVERLAY / 2}
-                width={ROOT_OVERLAY}
-                height={ROOT_OVERLAY}
+                x={cellX(barre.cell) - rootOverlay / 2}
+                y={stringY(string) - rootOverlay / 2}
+                width={rootOverlay}
+                height={rootOverlay}
                 rx={1.5}
                 fill="currentColor"
                 strokeWidth={1.5}
                 style={{ stroke: "var(--surface)" }}
               />
+            );
+          })}
+        {/* 指番号。点・棒・ルートの印より後に描き、背景色の文字で重ねる。セーハは棒の端（最も低い弦）の 1 か所だけ。 */}
+        {showFingers &&
+          voicing.flatMap((fret, i) => {
+            const finger = byString[i];
+            if (finger === null || finger === undefined || fret === null) return [];
+            if (barre && fret === barre.fret && i !== barre.from) return [];
+            return (
+              <text
+                key={`finger-${i}`}
+                data-mark="finger"
+                data-string={stringNumber(i)}
+                aria-hidden="true"
+                x={cellX(fret - startFret + 1)}
+                y={stringY(stringNumber(i))}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={FINGER_FONT_SIZE}
+                fontWeight={700}
+                stroke="none"
+                style={{ fill: "var(--surface)" }}
+              >
+                {finger}
+              </text>
             );
           })}
       </svg>

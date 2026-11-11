@@ -73,6 +73,14 @@ describe("共有ページ /s/<ID>", () => {
     expect(view().getAllByRole("img").map((img) => img.getAttribute("aria-label"))).toEqual(expectedLabels());
   });
 
+  it("各コードの図に指番号を出す（C の形 x32010 は 3・2・1）", async () => {
+    serve(found());
+    render(<App config={CONFIG} />);
+    await view().findByText("朝の曲");
+    const first = document.querySelector(".steps > .step")!;
+    expect(Array.from(first.querySelectorAll('[data-mark="finger"]')).map((e) => e.textContent)).toEqual(["3", "2", "1"]);
+  });
+
   it("読み込み中は、その旨を出す", async () => {
     serve(() => new Promise<Response>(() => {}));
     render(<App config={CONFIG} />);

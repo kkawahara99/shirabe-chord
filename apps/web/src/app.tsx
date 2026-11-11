@@ -615,7 +615,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                       {displaySymbol(symbol)}
                     </button>
                     {pins.has(i) && <span className="step-pinned">固定</span>}
-                    {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption />}
+                    {step && <VoicingDiagram symbol={step.symbol} voicing={step.voicing} hideCaption showFingers />}
                     {step && capo > 0 && <p className="step-shape">{displaySymbol(step.symbol)}の形</p>}
                     {step?.inWindow === false && <p className="out-of-window">手の位置から外れた押さえ方です</p>}
                     <button type="button" className="step-play" disabled={soundDisabled} onClick={() => playChord(i)}>

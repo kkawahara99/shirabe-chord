@@ -1,4 +1,4 @@
-import { generateVoicings, parseChord, rootStrings, voicingFeatures, type Voicing } from "@shirabe-chord/core";
+import { fingering, generateVoicings, parseChord, rootStrings, type Voicing } from "@shirabe-chord/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { startFretOf, VoicingDiagram, voicingFrets, voicingLabel } from "./voicing-diagram.tsx";
@@ -198,7 +198,8 @@ describe("VoicingDiagram（押さえ方の図）", () => {
           expect(cell).toBeGreaterThanOrEqual(1);
           expect(cell).toBeLessThanOrEqual(5);
         }
-        expect(marks(container, "barre")).toHaveLength(voicingFeatures(voicing).hasBarre ? 1 : 0);
+        // 棒は、指番号の規則（fingering）の結果に合わせる。hasBarre とは、例外の形（D の xx0232 など）で食い違う。
+        expect(marks(container, "barre")).toHaveLength(fingering(voicing).barre ? 1 : 0);
         expect(roots(container).map((m) => Number(m.dataset.string))).toEqual(
           rootStrings(symbol, voicing).reverse(),
         );
@@ -264,6 +265,115 @@ describe("VoicingDiagram のルート音の印", () => {
     expect(marks(container, "barre")).toHaveLength(1);
     expect(screen.getByRole("img").getAttribute("aria-label")).toBe("F: 133211");
   });
+});
+
+describe("VoicingDiagram のセーハの棒は、指番号の規則に合わせる", () => {
+  const D: Voicing = [null, null, 0, 2, 3, 2];
+
+  it("D xx0232 は hasBarre が真でも、棒を出さない（showFingers によらず）", () => {
+    const plain = render(<VoicingDiagram symbol="D" voicing={D} />);
+    expect(marks(plain.container, "barre")).toHaveLength(0);
+    expect(marks(plain.container, "dot")).toHaveLength(3);
+    plain.unmount();
+    const fingers = render(<VoicingDiagram symbol="D" voicing={D} showFingers />);
+    expect(marks(fingers.container, "barre")).toHaveLength(0);
+  });
+});
+
+describe("VoicingDiagram の指番号（showFingers）", () => {
+  const D: Voicing = [null, null, 0, 2, 3, 2];
+  const fingerLabels = (container: HTMLElement) =>
+    marks(container, "finger").map((m) => [m.dataset.string, m.textContent]);
+
+  it("既定（指定なし・false）では指番号を出さない", () => {
+    const { container, rerender } = render(<VoicingDiagram symbol="C" voicing={C} />);
+    expect(marks(container, "finger")).toHaveLength(0);
+    rerender(<VoicingDiagram symbol="C" voicing={C} showFingers={false} />);
+    expect(marks(container, "finger")).toHaveLength(0);
+  });
+
+  it("C x32010: 5弦 = 3、4弦 = 2、2弦 = 1 を、押さえる点の中心に出す（ルートの四角の上にも）", () => {
+    const { container } = render(<VoicingDiagram symbol="C" voicing={C} showFingers />);
+    expect(fingerLabels(container)).toEqual([
+      ["5", "3"],
+      ["4", "2"],
+      ["2", "1"],
+    ]);
+    for (const label of marks(container, "finger")) {
+      const dot = marks(container, "dot").find((d) => d.dataset.string === label.dataset.string)!;
+      expect(num(label, "x")).toBeCloseTo(center(dot).x, 5);
+      expect(num(label, "y")).toBeCloseTo(center(dot).y, 5);
+    }
+    // 5弦・2弦はルート（四角）。印は残り、番号がその上に出る。
+    expect(roots(container).map((m) => [m.tagName, m.dataset.string])).toEqual([
+      ["rect", "5"],
+      ["rect", "2"],
+    ]);
+  });
+
+  it("D xx0232: 棒が出ず、3弦 = 1、2弦 = 3、1弦 = 2（標準の 1・3・2 と同じ並び）", () => {
+    const { container } = render(<VoicingDiagram symbol="D" voicing={D} showFingers />);
+    expect(marks(container, "barre")).toHaveLength(0);
+    expect(fingerLabels(container)).toEqual([
+      ["3", "1"],
+      ["2", "3"],
+      ["1", "2"],
+    ]);
+  });
+
+  it("F 133211: 棒は 1 本で、1 は棒の端（6弦）に 1 か所だけ。ほかは 5弦 = 3、4弦 = 4、3弦 = 2", () => {
+    const { container } = render(<VoicingDiagram symbol="F" voicing={F} showFingers />);
+    expect(marks(container, "barre")).toHaveLength(1);
+    expect(fingerLabels(container)).toEqual([
+      ["6", "1"],
+      ["5", "3"],
+      ["4", "4"],
+      ["3", "2"],
+    ]);
+  });
+
+  it("番号は背景色（var(--surface)）で、点・棒・ルートの重ね印より後に描く。読み上げからは外す", () => {
+    const { container } = render(<VoicingDiagram symbol="F" voicing={F} showFingers />);
+    const labels = marks(container, "finger");
+    for (const label of labels) {
+      expect(label.getAttribute("style")).toContain("var(--surface)");
+      expect(label.getAttribute("aria-hidden")).toBe("true");
+    }
+    const all = Array.from(container.querySelectorAll("[data-mark]"));
+    const others = [...marks(container, "dot"), ...marks(container, "barre"), ...marks(container, "root-overlay")];
+    expect(Math.min(...labels.map((l) => all.indexOf(l)))).toBeGreaterThan(Math.max(...others.map((o) => all.indexOf(o))));
+  });
+
+  it("showFingers を付けても、ミュート・開放・点・ルートの印・読み上げラベルは変わらない", () => {
+    const plain = render(<VoicingDiagram symbol="F" voicing={F} />);
+    const withFingers = render(<VoicingDiagram symbol="F" voicing={F} showFingers />);
+    const kinds = ["mute", "open", "dot", "barre", "root-overlay"];
+    for (const kind of kinds) {
+      expect(marks(withFingers.container, kind)).toHaveLength(marks(plain.container, kind).length);
+    }
+    expect(roots(withFingers.container)).toHaveLength(roots(plain.container).length);
+    expect(withFingers.container.querySelector("svg")!.getAttribute("aria-label")).toBe("F: 133211");
+  });
+
+  it.each(["C", "Am", "F", "G7", "D", "Bm7(b5)", "Fm"])(
+    "%s の全候補で、番号は fingering の結果どおり（セーハは 1 か所だけ）",
+    (symbol) => {
+      const parsed = parseChord(symbol);
+      if (!parsed.ok) throw new Error(`読めないコード: ${symbol}`);
+      for (const voicing of generateVoicings(parsed)) {
+        const { container, unmount } = render(<VoicingDiagram symbol={symbol} voicing={voicing} showFingers />);
+        const { byString } = fingering(voicing);
+        const shown = marks(container, "finger");
+        const distinct = new Set(byString.filter((finger) => finger !== null));
+        expect(shown).toHaveLength(distinct.size);
+        for (const label of shown) {
+          const string = Number(label.dataset.string);
+          expect(Number(label.textContent)).toBe(byString[6 - string]);
+        }
+        unmount();
+      }
+    },
+  );
 });
 
 describe("VoicingDiagram の見出し", () => {

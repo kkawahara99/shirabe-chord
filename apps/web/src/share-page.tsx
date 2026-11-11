@@ -97,7 +97,7 @@ export function SharePage(props: { id: string; onHome: () => void; onEdit: (impo
                 <li key={i} className="step">
                   <span className="step-number">{i + 1}</span>
                   <span className="step-name">{displaySymbol(symbol)}</span>
-                  <VoicingDiagram symbol={shape} voicing={voicing} hideCaption />
+                  <VoicingDiagram symbol={shape} voicing={voicing} hideCaption showFingers />
                   {state.score.capo > 0 && <p className="step-shape">{displaySymbol(shape)}の形</p>}
                 </li>
               );

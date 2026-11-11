@@ -10,6 +10,8 @@ export type {
   Tension,
 } from "./chord-builder.ts";
 export { CAPO_FRETS, lowerSymbol } from "./chord-transpose.ts";
+export { fingering } from "./fingering.ts";
+export type { Barre, Fingering } from "./fingering.ts";
 export { DEFAULT_COST_WEIGHTS, transitionCost, voicingCost } from "./cost.ts";
 export type { CostWeights } from "./cost.ts";
 export { transpose } from "./pitch-class.ts";

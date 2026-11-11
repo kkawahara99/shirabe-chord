@@ -320,6 +320,18 @@ describe("App（画面全体）", () => {
     expect(picker.querySelector("figcaption")).toBeNull();
   });
 
+  it("譜面（進行の押さえ方）の図には指番号が出て、「押さえ方」の選択欄の図には出ない", () => {
+    render(<App />);
+    showTab("押さえ方");
+    const picker = screen.getByRole("group", { name: PICKER });
+    expect(picker.querySelectorAll("figure").length).toBeGreaterThan(0);
+    expect(picker.querySelectorAll('[data-mark="finger"]')).toHaveLength(0);
+    const score = screen.getByRole("region", { name: "進行の押さえ方" });
+    expect(score.querySelectorAll('[data-mark="finger"]').length).toBeGreaterThan(0);
+    // C の x32010 は、押さえる弦が 3 本なので指番号も 3 つ。
+    expect(Array.from(document.querySelector(".steps > .step")!.querySelectorAll('[data-mark="finger"]')).map((e) => e.textContent)).toEqual(["3", "2", "1"]);
+  });
+
   it("最初のコードに押さえ方が無いとき、「押さえ方」タブは出ず、手の位置のボタンは押せない", () => {
     render(<App />);
     pick("種類", "7");
