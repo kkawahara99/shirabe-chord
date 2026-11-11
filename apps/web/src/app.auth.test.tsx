@@ -103,6 +103,13 @@ describe("ヘッダーのログイン", () => {
     expect(screen.queryByRole("button", { name: "アカウントのメニュー" })).toBeNull();
   });
 
+  it("ログインのボタンは、先頭に GoogleMark が付き、名前は「Google でログイン」のまま", () => {
+    render(<App config={CONFIG} />);
+    const button = loginButton()!;
+    expect(button.firstElementChild?.getAttribute("class")).toBe("google-mark");
+    expect(button.textContent).toBe(LOGIN);
+  });
+
   it("押すと、進行・カポ・固定を退避して、認可 URL へ移る", async () => {
     const { goTo } = leaveForLogin();
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "./auth-context.tsx";
+import { GoogleMark } from "./google-mark.tsx";
 
 /** ヘッダーの右端。未ログインなら「Google でログイン」、ログイン済みならアイコンのメニュー。イニシャルや名前は出さない。 */
 export function AuthControl(props: { onOpenMine: () => void }) {
@@ -56,6 +57,7 @@ export function AuthControl(props: { onOpenMine: () => void }) {
         </>
       ) : (
         <button type="button" onClick={() => void auth.login(null)}>
+          <GoogleMark />
           Google でログイン
         </button>
       )}

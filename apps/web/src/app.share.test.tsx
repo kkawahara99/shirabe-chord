@@ -127,6 +127,14 @@ describe("ログイン前", () => {
     expect(turnstile.api.render).not.toHaveBeenCalled();
   });
 
+  it("案内のボタンは、先頭に GoogleMark が付き、名前は「Google でログイン」のまま", () => {
+    setup({ loggedIn: false });
+    fireEvent.click(shareButton()!);
+    const button = inDialog().getByRole("button", { name: LOGIN });
+    expect(button.firstElementChild?.getAttribute("class")).toBe("google-mark");
+    expect(button.textContent).toBe(LOGIN);
+  });
+
   it("案内のボタンで、進行を退避してログインへ進む。戻ったあとの操作は「共有」", async () => {
     const { goTo } = setup({ loggedIn: false });
     fireEvent.change(capoSelect(), { target: { value: "3" } });

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { App } from "./app.tsx";
+import type { AuthConfig } from "./auth-config.ts";
 import styleCss from "./style.css?raw";
 
 const hasIcon = (element: HTMLElement) => element.querySelector('svg[aria-hidden="true"]') !== null;
@@ -52,6 +53,22 @@ describe("App（操作ボタンのアイコン）", () => {
     for (const tab of within(screen.getByRole("group", { name: "編集の項目" })).getAllByRole("button")) {
       expect(hasIcon(tab)).toBe(false);
     }
+  });
+});
+
+const CONFIG: AuthConfig = {
+  cognitoDomain: "https://example.auth.ap-northeast-1.amazoncognito.com",
+  clientId: "client-id",
+  turnstileSiteKey: "site-key",
+};
+
+describe("App（共有のアイコン）", () => {
+  it("「共有する」は、文字の前に図が付き、名前は変わらない", () => {
+    render(<App config={CONFIG} />);
+    const button = screen.getByRole("button", { name: "共有する" });
+    expect(button.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    expect(hasIcon(button)).toBe(true);
+    expect(button.textContent).toBe("共有する");
   });
 });
 

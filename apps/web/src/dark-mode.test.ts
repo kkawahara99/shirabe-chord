@@ -105,6 +105,15 @@ describe("色の直書き", () => {
     expect(rest).not.toMatch(/\brgba?\(/);
   });
 
+  it("名前で書いた色（white・black）も、Google の G の白い丸（テーマで変えない公式の色の下地）以外には無い", () => {
+    const rest = css
+      .replace(printMedia, "")
+      .replace(darkMedia, "")
+      .replace(lightRoot, "")
+      .replace(/(?:^|\n)\.google-mark \{[^}]*\}/, "");
+    expect(rest).not.toMatch(/:\s*(?:white|black)\b/i);
+  });
+
   it("押した状態のボタンの文字色は var(--on-accent) である", () => {
     const rule = css.match(/\nbutton\[aria-pressed="true"\]\s*\{[^}]*\}/)?.[0];
     expect(rule).toMatch(/color:\s*var\(--on-accent\)\s*;/);

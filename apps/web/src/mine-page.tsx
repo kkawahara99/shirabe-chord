@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { useAuth } from "./auth-context.tsx";
+import { GoogleMark } from "./google-mark.tsx";
 import { isShareId } from "./route.ts";
 
 /** 1 人が持てる共有の数。apps/api の `MAX_SHARES_PER_OWNER` と同じ（web から api は読めないので写している）。 */
@@ -149,6 +150,7 @@ export function MinePage(props: { onHome: () => void; onOpen: (id: string) => vo
         <>
           <p>共有した譜面を見るには、Google ログインが必要です。</p>
           <button type="button" onClick={() => void auth.login("mine")}>
+            <GoogleMark />
             Google でログイン
           </button>
         </>

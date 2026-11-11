@@ -61,7 +61,7 @@ body {
 /* ---- ヘッダー ---- */
 
 .site-header {
-  position: relative; /* 「選び方」の中身を、本体を押し下げずに重ねる基準 */
+  position: relative; /* アカウントのメニューを、本体の上に重ねるため */
   z-index: 2;
   display: flex;
   flex: none;
@@ -97,19 +97,22 @@ body {
   min-height: 2rem;
   padding: 0 0.5rem;
   line-height: 2rem;
+  color: var(--text-sub); /* 目立たせない */
   cursor: pointer;
 }
 
+/* 画面の下端なので、フッターの上に重ねて開く */
 .how ul {
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   right: 0;
   left: 0;
   margin: 0;
   padding: 0.75rem 1rem 0.75rem 2rem;
+  text-align: left;
   background: var(--surface);
-  border-bottom: 1px solid var(--line);
-  box-shadow: 0 4px 8px rgb(0 0 0 / 0.08);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -4px 8px rgb(0 0 0 / 0.08);
 }
 
 /* ---- ヘッダー右端のログイン ---- */
@@ -326,7 +329,13 @@ body {
 /* ---- 画面の下端のリンク ---- */
 
 .site-footer {
+  position: relative; /* 「選び方」の中身を、本体を押し下げずに上へ重ねる基準 */
+  z-index: 2;
+  display: flex;
   flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0 1rem;
   padding: 0.25rem 1rem;
   font-size: 0.875rem;
   text-align: right;
@@ -366,11 +375,22 @@ button {
   height: 1.1em;
 }
 
-button:has(.icon) {
+button:has(.icon, .google-mark) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.4em;
+}
+
+/* Google の「G」。公式の色のまま使うので、暗い背景でも見えるよう白い丸の上に載せる */
+.google-mark {
+  flex: none;
+  box-sizing: border-box;
+  width: 1.5em;
+  height: 1.5em;
+  padding: 0.2em;
+  background: white; /* 色の変数にしない（テーマで変えない）。dark-mode.test.ts がこのブロックだけ例外にしている */
+  border-radius: 50%;
 }
 
 button.step-remove .icon {
@@ -547,6 +567,10 @@ button[aria-pressed="true"] {
   padding-top: 0.375rem;
   font-size: 0.875rem;
   color: var(--text-sub);
+}
+
+.more-qualities {
+  margin-left: 5.5rem; /* 見出しの列の幅。チップの列にそろえる */
 }
 
 .quality-chips {

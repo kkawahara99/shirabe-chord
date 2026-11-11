@@ -138,6 +138,14 @@ describe("共有した譜面 /mine：ログイン", () => {
     expect(readSnapshot(sessionStorage)?.after).toBe("mine");
   });
 
+  it("ログイン前のボタンは、先頭に GoogleMark が付き、名前は「Google でログイン」のまま", () => {
+    serve({});
+    render(<App config={CONFIG} />);
+    const button = main().getByRole("button", { name: "Google でログイン" });
+    expect(button.firstElementChild?.getAttribute("class")).toBe("google-mark");
+    expect(button.textContent).toBe("Google でログイン");
+  });
+
   it("取得が 401（期限切れ）：ログインの案内に切り替わる", async () => {
     loggedIn();
     serve({ list: () => new Response('{"error":"unauthorized"}', { status: 401 }) });

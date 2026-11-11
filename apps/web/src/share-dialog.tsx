@@ -8,6 +8,7 @@ import {
 } from "@shirabe-chord/core";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "./auth-context.tsx";
+import { GoogleMark } from "./google-mark.tsx";
 import { isShareId } from "./route.ts";
 import { TurnstileBox } from "./turnstile-box.tsx";
 
@@ -143,6 +144,7 @@ export function ShareDialog(props: {
           <>
             <p>共有には Google ログインが必要です</p>
             <button type="button" onClick={() => void auth.login("share")}>
+              <GoogleMark />
               Google でログイン
             </button>
           </>

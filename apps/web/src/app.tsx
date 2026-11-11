@@ -45,15 +45,19 @@ const ACCIDENTALS: readonly { value: Accidental; label: string }[] = [
   { value: "b", label: "♭" },
 ];
 
-/** 種類の並びと見出し。`names` は記号に出す名前（`CHORD_QUALITIES` の `names[0]`）で、空文字は三和音の M。 */
-const QUALITY_GROUPS: readonly { title: string; names: readonly string[] }[] = [
-  { title: "三和音", names: ["", "m", "aug", "dim", "sus2", "sus4"] },
-  { title: "7th", names: ["7", "M7", "m7", "mM7", "m7-5", "dim7", "7sus4"] },
-  { title: "6・9・13 系", names: ["6", "m6", "9", "M9", "m9", "add9", "13"] },
+/**
+ * 種類の並びと見出し。`names` は記号に出す名前（`CHORD_QUALITIES` の `names[0]`）で、空文字は三和音の M。
+ * `basic` は初めから出す名前、`more` は「…」で開くと加わる名前。
+ */
+const QUALITY_GROUPS: readonly { title: string; basic: readonly string[]; more: readonly string[] }[] = [
+  { title: "三和音", basic: ["", "m"], more: ["aug", "dim", "sus2", "sus4"] },
+  { title: "7th", basic: ["7", "M7", "m7"], more: ["mM7", "m7-5", "dim7", "7sus4"] },
+  { title: "6・9・13 系", basic: [], more: ["6", "m6", "9", "M9", "m9", "add9", "13"] },
 ];
 
 // コアの種類の一覧が増えたのに、画面の選択肢が足りないとき、ここで気づく。
-const listedNames = QUALITY_GROUPS.flatMap((g) => g.names);
+const listedNames = QUALITY_GROUPS.flatMap((g) => [...g.basic, ...g.more]);
+const HIDDEN_QUALITIES = new Set(QUALITY_GROUPS.flatMap((g) => g.more));
 if (
   listedNames.length !== CHORD_QUALITIES.length ||
   !CHORD_QUALITIES.every((q) => listedNames.includes(q.names[0]!))
@@ -168,6 +172,10 @@ function NotePicker(props: {
 
 function ChordTab(props: { selection: ChordSelection; onChange: (selection: ChordSelection) => void }) {
   const { selection, onChange } = props;
+  /** 「…」を手で開いたか。この部品はコードやタブを替えると作り直されるので、そのとき捨てられ、選んでいる種類で決め直される。 */
+  const [manuallyOpen, setManuallyOpen] = useState(false);
+  const hiddenSelected = HIDDEN_QUALITIES.has(selection.quality);
+  const expanded = manuallyOpen || hiddenSelected;
   return (
     <>
       <NotePicker
@@ -179,13 +187,16 @@ function ChordTab(props: { selection: ChordSelection; onChange: (selection: Chor
       />
       <fieldset className="choices">
         <legend>種類</legend>
-        {QUALITY_GROUPS.map((qualityGroup, i) => (
+        {QUALITY_GROUPS.map((qualityGroup, i) => {
+          const names = expanded ? [...qualityGroup.basic, ...qualityGroup.more] : qualityGroup.basic;
+          if (names.length === 0) return null;
+          return (
           <div key={qualityGroup.title} role="group" aria-labelledby={`quality-group-${i}`} className="quality-group">
             <span id={`quality-group-${i}`} className="quality-group-title">
               {qualityGroup.title}
             </span>
             <div className="quality-chips">
-              {qualityGroup.names.map((name) => (
+              {names.map((name) => (
                 <label key={name} className="choice">
                   <input
                     type="radio"
@@ -204,7 +215,18 @@ function ChordTab(props: { selection: ChordSelection; onChange: (selection: Chor
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
+        <button
+          type="button"
+          className="more-qualities"
+          aria-label="ほかの種類"
+          aria-expanded={expanded}
+          disabled={hiddenSelected}
+          onClick={() => setManuallyOpen(!manuallyOpen)}
+        >
+          …
+        </button>
       </fieldset>
     </>
   );
@@ -273,6 +295,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
   const [selected, setSelected] = useState(0);
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<EditorTab>("chord");
+  const [editEpoch, setEditEpoch] = useState(0);
 
   /**
    * 固定した押さえ方。進行の位置（0 始まり）→ 形。無い位置は「おまかせ」。
@@ -391,6 +414,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
     chooseChord(chords.length);
   };
   const removeChord = (index: number) => {
+    setEditEpoch(editEpoch + 1); // 番号が同じまま編集するコードが替わることがあるので、種類の開閉も決め直す
     setChords(chords.filter((_, i) => i !== index));
     // 削除したコードの固定は消え、後ろの固定は 1 つ前に詰まる（固定は固定したコードに付いたまま動く）。
     setPins(new Map([...pins].filter(([position]) => position !== index).map(([position, shape]) => [position > index ? position - 1 : position, shape])));
@@ -451,7 +475,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
       <header className="site-header">
         <div className="site-title">
           <h1>Shirabeコード</h1>
-          <p>コード進行を組み立てると、手の移動が少ない押さえ方の並びを出します。</p>
+          <p>コード進行から、手の移動が少ない押さえ方を生成♪</p>
         </div>
         {route.kind === "home" && (
           <>
@@ -468,20 +492,6 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
             <button type="button" className="hand-button" disabled={!handTargetHasShapes} onClick={showHandPosition}>
               手の位置：{handPositionLabel(handPosition)}
             </button>
-            <section aria-label="押さえ方の選び方" className="how">
-              <details>
-                <summary>選び方</summary>
-                <ul>
-                  <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
-                  <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
-                  <li>
-                    押さえ方を固定すると、固定したうち最も前のコードの最低フレットから5フレット分に、固定していないコードを収めます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
-                  </li>
-                  <li>押さえ方は、どのコードでも選び直せます。</li>
-                  <li>標準チューニングの右利きのギターを前提にしています。</li>
-                </ul>
-              </details>
-            </section>
           </>
         )}
         {config && <AuthControl onOpenMine={() => navigate("/mine")} />}
@@ -509,7 +519,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
                   ))}
                 </div>
                 <div className="tab-body">
-                  {shownTab === "chord" && <ChordTab selection={chords[selected]!} onChange={changeSelected} />}
+                  {shownTab === "chord" && <ChordTab key={`${selected}-${editEpoch}`} selection={chords[selected]!} onChange={changeSelected} />}
                   {shownTab === "extras" && <ExtrasTab selection={chords[selected]!} onChange={changeSelected} />}
                   {shownTab === "shape" && shapes.ok && (
                     <ShapePicker
@@ -539,6 +549,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
               </button>
               {config && (
                 <button type="button" ref={shareButton} disabled={!result.ok} onClick={() => setShareOpen(true)}>
+                  <Icon name="share" />
                   共有する
                 </button>
               )}
@@ -633,11 +644,25 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
           </section>
         </div>
       )}
-      {config && (
-        <footer className="site-footer">
-          <a href="/privacy.html">プライバシーポリシー</a>
-        </footer>
-      )}
+      <footer className="site-footer">
+        {route.kind === "home" && (
+          <section aria-label="押さえ方の選び方" className="how">
+            <details>
+              <summary>選び方</summary>
+              <ul>
+                <li>押さえ方は、手の移動が少なくなるように、進行全体で選びます。</li>
+                <li>同じコードが離れて出てきても、同じ押さえ方になるとは限りません（弾きやすい方を優先します）。</li>
+                <li>
+                  押さえ方を固定すると、固定したうち最も前のコードの最低フレットから5フレット分に、固定していないコードを収めます。開放弦とミュートは位置に関係なく使います。収まる押さえ方が無いコードだけ、範囲を広げて選びます（「手の位置から外れた押さえ方です」と出ます）。
+                </li>
+                <li>押さえ方は、どのコードでも選び直せます。</li>
+                <li>標準チューニングの右利きのギターを前提にしています。</li>
+              </ul>
+            </details>
+          </section>
+        )}
+        {config && <a href="/privacy.html">プライバシーポリシー</a>}
+      </footer>
     </div>
   );
   const page = (

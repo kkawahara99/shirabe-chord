@@ -90,8 +90,17 @@ const closeButton = () => screen.getByRole("button", { name: "閉じる" });
 const closePanel = () => fireEvent.click(closeButton());
 const openRail = () => fireEvent.click(screen.getByRole("button", { name: "編集を開く" }));
 const handButton = () => screen.getByRole("button", { name: /^手の位置：/ }) as HTMLButtonElement;
-const radio = (groupName: string, label: string) =>
-  within(group(groupName)).getByRole("radio", { name: groupName === "種類" ? shown(label) : label }) as HTMLInputElement;
+/** 初めは隠れている種類（基本の 5 個 M・m・7・M7・m7 以外）。 */
+const HIDDEN_QUALITIES = ["aug", "dim", "sus2", "sus4", "mM7", "m7-5", "dim7", "7sus4", "6", "m6", "9", "M9", "m9", "add9", "13"];
+// 注意: 隠れ側の種類を指定すると、取るだけでも「…」を開く（画面の状態が変わる）。
+const radio = (groupName: string, label: string) => {
+  const panel = within(group(groupName));
+  if (groupName === "種類" && HIDDEN_QUALITIES.includes(label)) {
+    const more = panel.getByRole("button", { name: "ほかの種類" });
+    if (more.getAttribute("aria-expanded") === "false") fireEvent.click(more); // 隠れ側を選んでいるあいだは、最初から開いている
+  }
+  return panel.getByRole("radio", { name: groupName === "種類" ? shown(label) : label }) as HTMLInputElement;
+};
 const checkbox = (label: string) =>
   within(group("テンション")).getByRole("checkbox", { name: shown(label) }) as HTMLInputElement;
 const pick = (groupName: string, label: string) => fireEvent.click(radio(groupName, label));
@@ -164,11 +173,13 @@ describe("App（画面全体）", () => {
     expect(diagramLabels()).toEqual(["C", "Am7", "F", "G7"]);
   });
 
-  it("根音・種類・テンション・ベース音は、見出し（legend）つきの組。種類は 20 個で、三和音の M も選べる", () => {
+  it("根音・種類・テンション・ベース音は、見出し（legend）つきの組。種類は、閉じていると基本の 5 個・開くと 20 個で、三和音の M も選べる", () => {
     render(<App />);
     for (const name of ["根音の音名", "根音の変化記号", "種類", "テンション", "ベース音の音名", "ベース音の変化記号"]) {
       expect(group(name)).toBeTruthy();
     }
+    expect(within(group("種類")).getAllByRole("radio")).toHaveLength(5);
+    fireEvent.click(within(group("種類")).getByRole("button", { name: "ほかの種類" }));
     expect(within(group("種類")).getAllByRole("radio")).toHaveLength(20);
     expect(radio("種類", "M").checked).toBe(true); // 初期の 1 番目は C
   });
@@ -741,7 +752,8 @@ describe("App（配置・編集パネル・開閉）", () => {
     const { container } = render(<App />);
     const header = container.querySelector("header")!;
     expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("Shirabeコード");
-    expect(header.textContent).toContain("コード進行を組み立てると");
+    expect(header.textContent).toContain("コード進行から、手の移動が少ない押さえ方を生成♪");
+    expect(header.textContent).not.toContain("組み立てると");
     expect(handButton().textContent).toBe("手の位置：おまかせ");
     const shapes = shapesOf("C");
     fireEvent.click(cardButton(3));
@@ -763,10 +775,11 @@ describe("App（配置・編集パネル・開閉）", () => {
     expect(pressedTab()).toBe("押さえ方");
   });
 
-  it("「押さえ方の選び方」は、ヘッダーの中の領域にある開閉の部品（summary は「選び方」）で、5 つの点を含む", () => {
+  it("「押さえ方の選び方」は、ヘッダーではなくフッターの中の領域にある開閉の部品（summary は「選び方」）で、5 つの点を含む", () => {
     const { container } = render(<App />);
     const region = screen.getByRole("region", { name: "押さえ方の選び方" });
-    expect(container.querySelector("header")!.contains(region)).toBe(true);
+    expect(container.querySelector("footer.site-footer")!.contains(region)).toBe(true);
+    expect(container.querySelector("header")!.contains(region)).toBe(false);
     expect(region.querySelector("details > summary")?.textContent).toBe("選び方");
     expect(region.querySelectorAll("li")).toHaveLength(5);
   });

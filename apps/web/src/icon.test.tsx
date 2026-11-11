@@ -34,6 +34,12 @@ describe("Icon", () => {
     for (const name of NAMES) expect(draw(name).querySelectorAll("path, rect, circle, line").length).toBeGreaterThan(0);
   });
 
+  it("共有（3 つの点を線でつないだ形）は、円 3 つと線でできている", () => {
+    const svg = draw("share");
+    expect(svg.querySelectorAll("circle")).toHaveLength(3);
+    expect(svg.querySelectorAll("path, line").length).toBeGreaterThan(0);
+  });
+
   it("ごみ箱と閉じる（×）は別の図", () => {
     expect(draw("trash").innerHTML).not.toBe(draw("close").innerHTML);
   });
