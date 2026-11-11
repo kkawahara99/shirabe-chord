@@ -764,7 +764,7 @@ describe("App（配置・編集パネル・開閉）", () => {
     const { container } = render(<App />);
     const header = container.querySelector("header")!;
     expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("Shirabeコード");
-    expect(header.textContent).toContain("コード進行から、手の移動が少ない押さえ方を生成♪");
+    expect(header.textContent).toContain("コード進行から、弾きやすい押さえ方を生成♪");
     expect(header.textContent).not.toContain("組み立てると");
     expect(handButton().textContent).toBe("手の位置：おまかせ");
     const shapes = shapesOf("C");

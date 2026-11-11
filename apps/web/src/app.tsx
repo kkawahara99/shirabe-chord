@@ -475,7 +475,7 @@ export function App({ config = DEFAULT_CONFIG, goTo = (url) => window.location.a
       <header className="site-header">
         <div className="site-title">
           <h1>Shirabeコード</h1>
-          <p>コード進行から、手の移動が少ない押さえ方を生成♪</p>
+          <p>コード進行から、弾きやすい押さえ方を生成♪</p>
         </div>
         {route.kind === "home" && (
           <>
